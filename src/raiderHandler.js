@@ -26,7 +26,7 @@ function isRaidEmbedChannel(ch) {
  * @param {import('discord.js').TextChannel | import('discord.js').NewsChannel} channel
  */
 async function createAlertThread(channel) {
-  const name = `ru-detector-${Date.now()}`.slice(0, 100);
+  const name = `flagged-run-${Date.now()}`.slice(0, 100);
   const base = {
     name,
     autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
