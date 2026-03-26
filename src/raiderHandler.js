@@ -5,7 +5,6 @@ import {
 import {
   namesAndRealms,
   ensureGuildsResolved,
-  shouldAlertForCyrillicUnwhitelisted,
   suspectNamesMatchingGuild,
   embedFromMessageEmbed,
 } from './helper.js';
@@ -45,22 +44,27 @@ async function createAlertThread(channel) {
  * @param {{ alwaysPingUserId?: string }} [opts]
  */
 export async function handleRaiderIoMessage(message, store, opts = {}) {
-  if (!message.guild || !isRaidEmbedChannel(message.channel)) return;
+  const tag = `[raider-handler][ch:${message.channelId}]`;
+
+  if (!message.guild) { console.log(tag, 'skip: no guild'); return; }
+  if (!isRaidEmbedChannel(message.channel)) { console.log(tag, 'skip: channel type', message.channel.type); return; }
 
   const embed = message.embeds[0];
-  if (!embed) return;
+  if (!embed) { console.log(tag, 'skip: no embed'); return; }
 
   const description = embed.description;
-  if (!description) return;
+  if (!description) { console.log(tag, 'skip: no description'); return; }
 
   const guildId = message.guild.id;
   const pairs = namesAndRealms(description);
-  if (pairs.length === 0) return;
+  console.log(tag, `pairs found: ${pairs.length}`, pairs.map(([r, n]) => `${n}@${r}`).join(', '));
+  if (pairs.length === 0) { console.log(tag, 'skip: no player pairs parsed'); return; }
 
   const hasCyrillic = CYRILLIC_REGEX.test(description);
+  console.log(tag, `hasCyrillic: ${hasCyrillic}`);
 
   if (!hasCyrillic) {
-    if (!opts.alwaysPingUserId) return;
+    if (!opts.alwaysPingUserId) { console.log(tag, 'skip: no cyrillic, no alwaysPingUserId'); return; }
     const thread = await createAlertThread(message.channel);
     await thread.send({
       content: `<@${opts.alwaysPingUserId}> No Cyrillic detected.`,
@@ -69,27 +73,16 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
-  const whitelistedGuilds = await store.listWhitelistedGuildNames(guildId);
-
   /** @type {Map<string, string | null>} */
   const guildByPair = new Map();
-  const cyrillicPlayerPairs = pairs.filter(([, playerName]) => CYRILLIC_REGEX.test(playerName));
-  await ensureGuildsResolved(cyrillicPlayerPairs, guildByPair);
-
-  if (!shouldAlertForCyrillicUnwhitelisted(description, whitelistedGuilds, pairs, guildByPair)) {
-    return;
-  }
-
   await ensureGuildsResolved(pairs, guildByPair);
+  console.log(tag, 'guildByPair:', [...guildByPair.entries()].map(([k, v]) => `${k}=${v}`).join(', '));
 
   const settings = await store.getSettings(guildId);
   const wowGuildName = settings?.wow_guild_name ?? null;
+  console.log(tag, `wowGuildName: ${wowGuildName}`);
   const suspectNames = suspectNamesMatchingGuild(wowGuildName, pairs, guildByPair);
-  const playerWhitelist = await store.listWhitelistedPlayers(guildId);
-
-  if (suspectNames.length > 0 && suspectNames.every((n) => playerWhitelist.includes(n))) {
-    return;
-  }
+  console.log(tag, `suspectNames: ${suspectNames.join(', ') || '(none)'}`);
 
   const strikes = await Promise.all(
     suspectNames.map((name) => store.incrementStrike(guildId, name)),

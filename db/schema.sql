@@ -7,17 +7,6 @@ create table if not exists discord_guild_settings (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists wow_guild_whitelist (
-  discord_guild_id text not null,
-  wow_guild_name text not null,
-  primary key (discord_guild_id, wow_guild_name)
-);
-
-create table if not exists player_whitelist (
-  discord_guild_id text not null,
-  player_name text not null,
-  primary key (discord_guild_id, player_name)
-);
 
 create table if not exists player_strikes (
   discord_guild_id text not null,

@@ -17,7 +17,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('info')
-    .setDescription('Show saved setup and whitelists'),
+    .setDescription('Show saved setup'),
 ].map((c) => c.setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON());
 
 /**

@@ -77,14 +77,10 @@ async function handleInteraction(interaction) {
 
     if (commandName === 'info') {
       const s = await store.getSettings(guildId);
-      const g = await store.listWhitelistedGuildNames(guildId);
-      const p = await store.listWhitelistedPlayers(guildId);
       await interaction.reply({
         content: [
           `**WoW guild (tracked):** ${s?.wow_guild_name ?? '—'}`,
           `**Officer role ID:** ${s?.officer_role_id ?? '—'}`,
-          `**Whitelisted WoW guilds:** ${g.length ? g.join(', ') : '—'}`,
-          `**Whitelisted players:** ${p.length ? p.join(', ') : '—'}`,
         ].join('\n'),
         flags: MessageFlags.Ephemeral,
       });
@@ -176,10 +172,13 @@ function startBot() {
   client.on(Events.MessageCreate, (message) => {
     void (async () => {
       if (!message.guild || !store) return;
-    const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
-    if (message.author.bot && message.author.username === 'Raider.IO') {
-      await handleRaiderIoMessage(message, store, { alwaysPingUserId });
-    }
+      const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+      if (message.author.bot) {
+        console.log(`[msg] bot message from "${message.author.username}" (id:${message.author.id}) in ch:${message.channelId}`);
+      }
+      if (message.author.bot && message.author.username === 'Raider.IO') {
+        await handleRaiderIoMessage(message, store, { alwaysPingUserId });
+      }
     })();
   });
 

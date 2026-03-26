@@ -4,7 +4,6 @@ import { EmbedBuilder } from 'discord.js';
 export const PLAYER_REGEX =
   /https:\/\/raider\.io\/characters\/eu\/(?<realm>.+)\/(?<name>.+)\?/g;
 
-const CYRILLIC_REGEX = /[а-яА-Я]/;
 
 export function pairKey(realm, playerName) {
   return `${realm}\0${playerName}`;
@@ -70,23 +69,6 @@ export async function ensureGuildsResolved(pairs, guildByPair) {
       guildByPair.set(k, g);
     }),
   );
-}
-
-/**
- * @param {string | null | undefined} description
- * @param {string[]} whitelistedGuildNames
- * @param {[string, string][]} pairs
- * @param {Map<string, string | null>} guildByPair
- */
-export function shouldAlertForCyrillicUnwhitelisted(description, whitelistedGuildNames, pairs, guildByPair) {
-  if (!description || !CYRILLIC_REGEX.test(description)) return false;
-  for (const [realm, playerName] of pairs) {
-    if (!CYRILLIC_REGEX.test(playerName)) continue;
-    const guild = guildByPair.get(pairKey(realm, playerName)) ?? null;
-    if (!guild) continue;
-    if (!whitelistedGuildNames.includes(guild)) return true;
-  }
-  return false;
 }
 
 /**

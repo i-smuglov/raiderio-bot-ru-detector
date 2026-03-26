@@ -45,64 +45,6 @@ export class GuildStore {
     return row;
   }
 
-  /** @param {string} discordGuildId */
-  async listWhitelistedGuildNames(discordGuildId) {
-    const r = await this.pool.query(
-      `select wow_guild_name from wow_guild_whitelist where discord_guild_id = $1 order by wow_guild_name`,
-      [discordGuildId],
-    );
-    return r.rows.map((x) => x.wow_guild_name);
-  }
-
-  /** @param {string} discordGuildId @param {string} wowGuildName */
-  async addWhitelistedGuild(discordGuildId, wowGuildName) {
-    await this.pool.query(
-      `insert into wow_guild_whitelist (discord_guild_id, wow_guild_name)
-       values ($1, $2)
-       on conflict (discord_guild_id, wow_guild_name) do nothing`,
-      [discordGuildId, wowGuildName],
-    );
-    return this.listWhitelistedGuildNames(discordGuildId);
-  }
-
-  /** @param {string} discordGuildId @param {string} wowGuildName */
-  async removeWhitelistedGuild(discordGuildId, wowGuildName) {
-    await this.pool.query(
-      `delete from wow_guild_whitelist where discord_guild_id = $1 and wow_guild_name = $2`,
-      [discordGuildId, wowGuildName],
-    );
-    return this.listWhitelistedGuildNames(discordGuildId);
-  }
-
-  /** @param {string} discordGuildId */
-  async listWhitelistedPlayers(discordGuildId) {
-    const r = await this.pool.query(
-      `select player_name from player_whitelist where discord_guild_id = $1 order by player_name`,
-      [discordGuildId],
-    );
-    return r.rows.map((x) => x.player_name);
-  }
-
-  /** @param {string} discordGuildId @param {string} playerName */
-  async addWhitelistedPlayer(discordGuildId, playerName) {
-    await this.pool.query(
-      `insert into player_whitelist (discord_guild_id, player_name)
-       values ($1, $2)
-       on conflict (discord_guild_id, player_name) do nothing`,
-      [discordGuildId, playerName],
-    );
-    return this.listWhitelistedPlayers(discordGuildId);
-  }
-
-  /** @param {string} discordGuildId @param {string} playerName */
-  async removeWhitelistedPlayer(discordGuildId, playerName) {
-    await this.pool.query(
-      `delete from player_whitelist where discord_guild_id = $1 and player_name = $2`,
-      [discordGuildId, playerName],
-    );
-    return this.listWhitelistedPlayers(discordGuildId);
-  }
-
   /** @param {string} discordGuildId @param {string} playerName */
   async incrementStrike(discordGuildId, playerName) {
     const r = await this.pool.query(
