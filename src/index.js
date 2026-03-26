@@ -4,6 +4,7 @@ import {
   Events,
   GatewayIntentBits,
   InteractionType,
+  MessageFlags,
 } from 'discord.js';
 import { createPool } from './dbPool.js';
 import { GuildStore } from './guildStore.js';
@@ -62,7 +63,7 @@ async function handleInteraction(interaction) {
       const s = await store.upsertSettings(guildId, patch);
       await interaction.reply({
         content: `Guild Name: ${s.wow_guild_name ?? '—'}\nOfficer Role ID: ${s.officer_role_id ?? '—'}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -78,7 +79,7 @@ async function handleInteraction(interaction) {
           `**Whitelisted WoW guilds:** ${g.length ? g.join(', ') : '—'}`,
           `**Whitelisted players:** ${p.length ? p.join(', ') : '—'}`,
         ].join('\n'),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -86,37 +87,51 @@ async function handleInteraction(interaction) {
     if (commandName === 'add-guild-to-whitelist') {
       const guild = options.getString('guild', true);
       const list = await store.addWhitelistedGuild(guildId, guild);
-      await interaction.reply({ content: list.join(', ') || '(empty)', ephemeral: true });
+      await interaction.reply({
+        content: list.join(', ') || '(empty)',
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
     if (commandName === 'remove-guild-from-whitelist') {
       const guild = options.getString('guild', true);
       const list = await store.removeWhitelistedGuild(guildId, guild);
-      await interaction.reply({ content: list.join(', ') || '(empty)', ephemeral: true });
+      await interaction.reply({
+        content: list.join(', ') || '(empty)',
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
     if (commandName === 'add-player-to-whitelist') {
       const player = options.getString('player', true);
       const list = await store.addWhitelistedPlayer(guildId, player);
-      await interaction.reply({ content: list.join(', ') || '(empty)', ephemeral: true });
+      await interaction.reply({
+        content: list.join(', ') || '(empty)',
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
     if (commandName === 'remove-player-from-whitelist') {
       const player = options.getString('player', true);
       const list = await store.removeWhitelistedPlayer(guildId, player);
-      await interaction.reply({ content: list.join(', ') || '(empty)', ephemeral: true });
+      await interaction.reply({
+        content: list.join(', ') || '(empty)',
+        flags: MessageFlags.Ephemeral,
+      });
     }
   } catch (e) {
     console.error(e);
     const msg = formatInteractionError(e);
     const content = `Error: ${msg}`.slice(0, 2000);
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content, ephemeral: true }).catch(() => {});
+      await interaction
+        .followUp({ content, flags: MessageFlags.Ephemeral })
+        .catch(() => {});
     } else {
-      await interaction.reply({ content, ephemeral: true }).catch(() => {});
+      await interaction.reply({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   }
 }
