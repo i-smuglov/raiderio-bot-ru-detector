@@ -215,8 +215,9 @@ function startBot() {
     void (async () => {
       if (!message.guild || !store) return;
     const debugUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+    const debugNickname = process.env.BOT_DEBUG_USER_NICKNAME?.trim() || undefined;
     if (message.author.bot && message.author.username === 'Raider.IO') {
-      await handleRaiderIoMessage(message, store, { debugUserId });
+      await handleRaiderIoMessage(message, store, { debugUserId, debugNickname });
     }
     })();
   });
