@@ -140,14 +140,38 @@ async function handleInteraction(interaction) {
  * @param {unknown} e
  */
 function formatInteractionError(e) {
-  if (e instanceof Error && e.message) {
-    const err = /** @type {Error & { code?: string; detail?: string }} */ (e);
-    const bits = [err.message];
-    if (err.code) bits.push(`(${err.code})`);
-    if (err.detail) bits.push(err.detail);
-    return bits.join(' ');
+  if (e instanceof AggregateError && Array.isArray(e.errors) && e.errors.length > 0) {
+    const parts = e.errors.map((sub) => formatInteractionError(sub));
+    const uniq = [...new Set(parts.filter(Boolean))];
+    const text = uniq.join('; ') || e.message || 'AggregateError';
+    return e.code === 'ECONNREFUSED'
+      ? `${text}. Database unreachable — on Railway use DATABASE_URL as a reference to Postgres (not localhost).`
+      : text;
   }
+
+  if (e instanceof Error) {
+    const err = /** @type {Error & { code?: string; detail?: string; syscall?: string }} */ (
+      e
+    );
+    const bits = [];
+    if (err.message?.trim()) bits.push(err.message.trim());
+    if (err.code) bits.push(`[${err.code}]`);
+    if (err.syscall) bits.push(err.syscall);
+    if (err.detail) bits.push(err.detail);
+    let text = bits.length ? bits.join(' ') : err.name || 'Error';
+
+    if (err.code === 'ECONNREFUSED') {
+      text +=
+        ' — Database refused connection. If host is localhost, set DATABASE_URL in Railway from your Postgres service (reference), then redeploy.';
+    }
+    return text;
+  }
+
   if (typeof e === 'string' && e) return e;
+  if (e && typeof e === 'object' && 'code' in e) {
+    const o = /** @type {{ code?: string; message?: string }} */ (e);
+    return [o.message, o.code && `[${o.code}]`].filter(Boolean).join(' ') || 'Unknown error';
+  }
   try {
     return JSON.stringify(e);
   } catch {
