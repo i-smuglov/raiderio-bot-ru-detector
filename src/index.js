@@ -214,13 +214,10 @@ function startBot() {
   client.on(Events.MessageCreate, (message) => {
     void (async () => {
       if (!message.guild || !store) return;
-      if (message.author.bot && message.author.username === 'Raider.IO') {
-        await handleRaiderIoMessage(message, store);
-      }
-      const debug = process.env.BOT_DEBUG_USERNAME;
-      if (debug && message.author.username === debug && message.content === 'Ping!') {
-        await message.reply('Pong!');
-      }
+    const debugUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+    if (message.author.bot && message.author.username === 'Raider.IO') {
+      await handleRaiderIoMessage(message, store, { debugUserId });
+    }
     })();
   });
 

@@ -48,8 +48,9 @@ async function createAlertThread(channel) {
 /**
  * @param {import('discord.js').Message} message
  * @param {import('./guildStore.js').GuildStore} store
+ * @param {{ debugUserId?: string }} [opts]
  */
-export async function handleRaiderIoMessage(message, store) {
+export async function handleRaiderIoMessage(message, store, opts = {}) {
   if (!message.guild || !isRaidEmbedChannel(message.channel)) return;
 
   const embed = message.embeds[0];
@@ -94,8 +95,11 @@ export async function handleRaiderIoMessage(message, store) {
     return `${name} (${count} ${label})`;
   });
 
-  const roleId = settings?.officer_role_id;
-  const mention = roleId ? `<@&${roleId}> ` : '';
+  const mention = opts.debugUserId
+    ? `<@${opts.debugUserId}> [DEBUG] `
+    : settings?.officer_role_id
+      ? `<@&${settings.officer_role_id}> `
+      : '';
 
   const thread = await createAlertThread(message.channel);
 
