@@ -1,0 +1,11 @@
+# https://docs.railway.com/reference/config-as-code
+# Add a Postgres plugin in Railway and link DATABASE_URL to this service.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
