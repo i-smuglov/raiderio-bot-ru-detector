@@ -161,9 +161,17 @@ function startBot() {
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Logged in as ${c.user.tag}`);
+    console.log(`[boot] in ${c.guilds.cache.size} guild(s):`, [...c.guilds.cache.values()].map((g) => `${g.name}(${g.id})`).join(', '));
     await registerSlashCommands(token, c.user.id);
     console.log('Slash commands registered');
   });
+
+  client.on(Events.GuildCreate, (g) => {
+    console.log(`[guild] joined: ${g.name} (${g.id})`);
+  });
+
+  client.on(Events.Warn, (msg) => console.warn('[discord warn]', msg));
+  client.on(Events.Error, (err) => console.error('[discord error]', err));
 
   client.on(Events.InteractionCreate, (i) => {
     void handleInteraction(i);
