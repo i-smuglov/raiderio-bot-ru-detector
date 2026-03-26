@@ -171,11 +171,9 @@ function startBot() {
 
   client.on(Events.MessageCreate, (message) => {
     void (async () => {
-      if (!message.guild || !store) return;
+      console.log(`[msg] from "${message.author.username}" bot=${message.author.bot} guild=${message.guildId ?? 'none'} ch=${message.channelId}`);
+      if (!message.guild || !store) { console.log('[msg] skip: no guild or store'); return; }
       const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
-      if (message.author.bot) {
-        console.log(`[msg] bot message from "${message.author.username}" (id:${message.author.id}) in ch:${message.channelId}`);
-      }
       if (message.author.bot && message.author.username === 'Raider.IO') {
         try {
           await handleRaiderIoMessage(message, store, { alwaysPingUserId });
