@@ -16,6 +16,15 @@ function pgUrlHostname(connectionString) {
   }
 }
 
+/** True when this process runs on Railway (NODE_ENV is not always set to "production"). */
+function isLikelyRailwayRuntime() {
+  return Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.RAILWAY_SERVICE_ID,
+  );
+}
+
 export function createPool() {
   const connectionString = process.env.DATABASE_URL?.trim();
   if (!connectionString) {
@@ -29,10 +38,24 @@ export function createPool() {
     host === '[::1]' ||
     host === '::1';
 
-  if (loopback && process.env.NODE_ENV === 'production') {
+  const forbidLocalDb =
+    process.env.NODE_ENV === 'production' ||
+    isLikelyRailwayRuntime() ||
+    process.env.FORBID_LOCAL_DATABASE_URL === '1';
+
+  if (loopback && forbidLocalDb) {
     throw new Error(
-      'DATABASE_URL points to localhost—there is no Postgres inside the bot container. On Railway: open the bot service → Variables → ensure DATABASE_URL is a Reference to the Postgres plugin (hostname like *.railway.internal), not a local URL.',
+      [
+        `DATABASE_URL uses host "${host}" — Postgres is not on this container.`,
+        'Fix (Railway): open your BOT service → Variables → remove any manually-entered DATABASE_URL.',
+        'Click "New variable" → "Variable reference" → select your Postgres service → DATABASE_URL.',
+        'Save, then Redeploy. The host should look like *.railway.internal (never localhost).',
+      ].join(' '),
     );
+  }
+
+  if (!loopback) {
+    console.log(`[db] connecting to PostgreSQL host: ${host}`);
   }
 
   return new Pool({

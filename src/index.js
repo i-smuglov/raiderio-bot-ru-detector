@@ -136,34 +136,25 @@ async function handleInteraction(interaction) {
   }
 }
 
+const RAILWAY_DB_ECONN_HINT =
+  'Railway fix: Bot service → Variables → delete manual DATABASE_URL → add Variable reference → Postgres → DATABASE_URL → Redeploy (host must be *.railway.internal, not localhost).';
+
 /**
  * @param {unknown} e
  */
 function formatInteractionError(e) {
   if (e instanceof AggregateError && Array.isArray(e.errors) && e.errors.length > 0) {
-    const parts = e.errors.map((sub) => formatInteractionError(sub));
+    const parts = e.errors.map((sub) => errorOneLine(sub));
     const uniq = [...new Set(parts.filter(Boolean))];
-    const text = uniq.join('; ') || e.message || 'AggregateError';
-    return e.code === 'ECONNREFUSED'
-      ? `${text}. Database unreachable — on Railway use DATABASE_URL as a reference to Postgres (not localhost).`
-      : text;
+    let text = uniq.join('; ') || e.message || 'AggregateError';
+    if (e.code === 'ECONNREFUSED') text += ` ${RAILWAY_DB_ECONN_HINT}`;
+    return text;
   }
 
   if (e instanceof Error) {
-    const err = /** @type {Error & { code?: string; detail?: string; syscall?: string }} */ (
-      e
-    );
-    const bits = [];
-    if (err.message?.trim()) bits.push(err.message.trim());
-    if (err.code) bits.push(`[${err.code}]`);
-    if (err.syscall) bits.push(err.syscall);
-    if (err.detail) bits.push(err.detail);
-    let text = bits.length ? bits.join(' ') : err.name || 'Error';
-
-    if (err.code === 'ECONNREFUSED') {
-      text +=
-        ' — Database refused connection. If host is localhost, set DATABASE_URL in Railway from your Postgres service (reference), then redeploy.';
-    }
+    let text = errorOneLine(e);
+    const err = /** @type {Error & { code?: string }} */ (e);
+    if (err.code === 'ECONNREFUSED') text += ` ${RAILWAY_DB_ECONN_HINT}`;
     return text;
   }
 
@@ -177,6 +168,21 @@ function formatInteractionError(e) {
   } catch {
     return e === undefined || e === null ? 'Unknown error — check Railway logs' : String(e);
   }
+}
+
+/**
+ * Single line, no Railway essay (used inside AggregateError).
+ * @param {unknown} e
+ */
+function errorOneLine(e) {
+  if (!(e instanceof Error)) return formatInteractionError(e);
+  const err = /** @type {Error & { code?: string; syscall?: string; detail?: string }} */ (e);
+  const bits = [];
+  if (err.message?.trim()) bits.push(err.message.trim());
+  if (err.code) bits.push(`[${err.code}]`);
+  if (err.syscall) bits.push(err.syscall);
+  if (err.detail) bits.push(err.detail);
+  return bits.length ? bits.join(' ') : err.name || 'Error';
 }
 
 client.once(Events.ClientReady, async (c) => {
