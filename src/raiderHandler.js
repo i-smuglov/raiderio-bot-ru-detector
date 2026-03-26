@@ -57,7 +57,17 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   const pairs = namesAndRealms(description);
   if (pairs.length === 0) return;
 
-  if (!CYRILLIC_REGEX.test(description)) return;
+  const hasCyrillic = CYRILLIC_REGEX.test(description);
+
+  if (!hasCyrillic) {
+    if (!opts.alwaysPingUserId) return;
+    const thread = await createAlertThread(message.channel);
+    await thread.send({
+      content: `<@${opts.alwaysPingUserId}> No Cyrillic detected.`,
+      embeds: [embedFromMessageEmbed(embed)],
+    });
+    return;
+  }
 
   const whitelistedGuilds = await store.listWhitelistedGuildNames(guildId);
 
