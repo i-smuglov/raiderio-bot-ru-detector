@@ -8,7 +8,6 @@ import {
   shouldAlertForCyrillicUnwhitelisted,
   suspectNamesMatchingGuild,
   embedFromMessageEmbed,
-  pairKey,
 } from './helper.js';
 
 const CYRILLIC_REGEX = /[а-яА-Я]/;
@@ -43,7 +42,7 @@ async function createAlertThread(channel) {
 /**
  * @param {import('discord.js').Message} message
  * @param {import('./guildStore.js').GuildStore} store
- * @param {{ debugUserId?: string; debugNickname?: string }} [opts]
+ * @param {{ alwaysPingUserId?: string }} [opts]
  */
 export async function handleRaiderIoMessage(message, store, opts = {}) {
   if (!message.guild || !isRaidEmbedChannel(message.channel)) return;
@@ -58,22 +57,6 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   const pairs = namesAndRealms(description);
   if (pairs.length === 0) return;
 
-  // Debug nick check: if BOT_DEBUG_USER_NICKNAME is in the group, always alert debug user.
-  const debugNickname = opts.debugNickname?.toLowerCase();
-  const debugUserId = opts.debugUserId;
-  if (debugNickname && debugUserId) {
-    const matchingPair = pairs.find(([, name]) => name.toLowerCase() === debugNickname);
-    if (matchingPair) {
-      const thread = await createAlertThread(message.channel);
-      await thread.send({
-        content: `<@${debugUserId}> [DEBUG] ${debugNickname} is in this group.`,
-        embeds: [embedFromMessageEmbed(embed)],
-      });
-      return;
-    }
-  }
-
-  // Normal detection: requires Cyrillic somewhere in the description.
   if (!CYRILLIC_REGEX.test(description)) return;
 
   const whitelistedGuilds = await store.listWhitelistedGuildNames(guildId);
@@ -108,11 +91,11 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return `${name} (${count} ${label})`;
   });
 
-  const mention = debugUserId
-    ? `<@${debugUserId}> [DEBUG] `
-    : settings?.officer_role_id
-      ? `<@&${settings.officer_role_id}> `
-      : '';
+  const mentionParts = [
+    opts.alwaysPingUserId ? `<@${opts.alwaysPingUserId}>` : '',
+    settings?.officer_role_id ? `<@&${settings.officer_role_id}>` : '',
+  ].filter(Boolean);
+  const mention = mentionParts.length ? `${mentionParts.join(' ')} ` : '';
 
   const thread = await createAlertThread(message.channel);
   await thread.send({

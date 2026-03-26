@@ -176,10 +176,9 @@ function startBot() {
   client.on(Events.MessageCreate, (message) => {
     void (async () => {
       if (!message.guild || !store) return;
-    const debugUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
-    const debugNickname = process.env.BOT_DEBUG_USER_NICKNAME?.trim() || undefined;
+    const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
     if (message.author.bot && message.author.username === 'Raider.IO') {
-      await handleRaiderIoMessage(message, store, { debugUserId, debugNickname });
+      await handleRaiderIoMessage(message, store, { alwaysPingUserId });
     }
     })();
   });
