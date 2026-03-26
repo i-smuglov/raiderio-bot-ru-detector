@@ -47,9 +47,8 @@ export function createPool() {
     throw new Error(
       [
         `DATABASE_URL uses host "${host}" — Postgres is not on this container.`,
-        'Fix (Railway): open your BOT service → Variables → remove any manually-entered DATABASE_URL.',
-        'Click "New variable" → "Variable reference" → select your Postgres service → DATABASE_URL.',
-        'Save, then Redeploy. The host should look like *.railway.internal (never localhost).',
+        'Railway: Bot → Variables → remove wrong DATABASE_URL. Add DATABASE_URL = ${{ YourPostgresServiceName.DATABASE_URL }}',
+        '(type that template manually if "reference" has no suggestions; name must match Postgres service on the canvas). Redeploy.',
       ].join(' '),
     );
   }

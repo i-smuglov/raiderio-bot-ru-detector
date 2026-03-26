@@ -11,27 +11,33 @@ import { GuildStore } from './guildStore.js';
 import { registerSlashCommands } from './registerCommands.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
 
-function startHealthServer() {
+/**
+ * Bind HTTP first and only then run DB/Discord startup.
+ * Railway probes `/` immediately; if createPool() throws before listen(), health never comes up.
+ *
+ * @param {() => void} onListening
+ */
+function startHealthServer(onListening) {
   const port = process.env.PORT ?? '8080';
-  http
-    .createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('ok');
-    })
-    .listen(Number(port), '0.0.0.0', () => {
-      console.log(`Health check on :${port}`);
-    });
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+  });
+  server.on('error', (err) => {
+    console.error('[health] failed to bind:', err);
+    process.exit(1);
+  });
+  server.listen(Number(port), '0.0.0.0', () => {
+    console.log(`[health] listening on 0.0.0.0:${port}`);
+    onListening();
+  });
 }
 
-const token = process.env.DISCORD_TOKEN;
-if (!token) {
-  throw new Error('Missing DISCORD_TOKEN');
-}
-
-const pool = createPool();
-const store = new GuildStore(pool);
-
-startHealthServer();
+/** @type {import('pg').Pool | undefined} */
+let pool;
+/** @type {GuildStore | undefined} */
+let store;
+let token = '';
 
 const client = new Client({
   intents: [
@@ -46,6 +52,7 @@ const client = new Client({
  * @param {import('discord.js').Interaction} interaction
  */
 async function handleInteraction(interaction) {
+  if (!store) return;
   if (interaction.type !== InteractionType.ApplicationCommand || !interaction.inGuild()) return;
   if (!interaction.isChatInputCommand()) return;
 
@@ -185,39 +192,58 @@ function errorOneLine(e) {
   return bits.length ? bits.join(' ') : err.name || 'Error';
 }
 
-client.once(Events.ClientReady, async (c) => {
-  console.log(`Logged in as ${c.user.tag}`);
-  await registerSlashCommands(token, c.user.id);
-  console.log('Slash commands registered');
-});
+function startBot() {
+  token = process.env.DISCORD_TOKEN ?? '';
+  if (!token) {
+    throw new Error('Missing DISCORD_TOKEN');
+  }
 
-client.on(Events.InteractionCreate, (i) => {
-  void handleInteraction(i);
-});
+  pool = createPool();
+  store = new GuildStore(pool);
 
-client.on(Events.MessageCreate, (message) => {
-  void (async () => {
-    if (!message.guild) return;
-    if (message.author.bot && message.author.username === 'Raider.IO') {
-      await handleRaiderIoMessage(message, store);
-    }
-    const debug = process.env.BOT_DEBUG_USERNAME;
-    if (debug && message.author.username === debug && message.content === 'Ping!') {
-      await message.reply('Pong!');
-    }
-  })();
-});
+  client.once(Events.ClientReady, async (c) => {
+    console.log(`Logged in as ${c.user.tag}`);
+    await registerSlashCommands(token, c.user.id);
+    console.log('Slash commands registered');
+  });
+
+  client.on(Events.InteractionCreate, (i) => {
+    void handleInteraction(i);
+  });
+
+  client.on(Events.MessageCreate, (message) => {
+    void (async () => {
+      if (!message.guild || !store) return;
+      if (message.author.bot && message.author.username === 'Raider.IO') {
+        await handleRaiderIoMessage(message, store);
+      }
+      const debug = process.env.BOT_DEBUG_USERNAME;
+      if (debug && message.author.username === debug && message.content === 'Ping!') {
+        await message.reply('Pong!');
+      }
+    })();
+  });
+
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
+  client.login(token);
+}
 
 /**
  * @param {string} signal
  */
 async function shutdown(signal) {
   console.log(`${signal} received, closing DB pool`);
-  await pool.end().catch(() => {});
+  if (pool) await pool.end().catch(() => {});
   process.exit(0);
 }
 
-process.once('SIGINT', () => void shutdown('SIGINT'));
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
-
-client.login(token);
+startHealthServer(() => {
+  try {
+    startBot();
+  } catch (e) {
+    console.error('[boot] startup failed (health server is already listening):', e);
+    process.exit(1);
+  }
+});
