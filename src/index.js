@@ -91,44 +91,6 @@ async function handleInteraction(interaction) {
       return;
     }
 
-    if (commandName === 'add-guild-to-whitelist') {
-      const guild = options.getString('guild', true);
-      const list = await store.addWhitelistedGuild(guildId, guild);
-      await interaction.reply({
-        content: list.join(', ') || '(empty)',
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    if (commandName === 'remove-guild-from-whitelist') {
-      const guild = options.getString('guild', true);
-      const list = await store.removeWhitelistedGuild(guildId, guild);
-      await interaction.reply({
-        content: list.join(', ') || '(empty)',
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    if (commandName === 'add-player-to-whitelist') {
-      const player = options.getString('player', true);
-      const list = await store.addWhitelistedPlayer(guildId, player);
-      await interaction.reply({
-        content: list.join(', ') || '(empty)',
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    if (commandName === 'remove-player-from-whitelist') {
-      const player = options.getString('player', true);
-      const list = await store.removeWhitelistedPlayer(guildId, player);
-      await interaction.reply({
-        content: list.join(', ') || '(empty)',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
   } catch (e) {
     console.error(e);
     const msg = formatInteractionError(e);
