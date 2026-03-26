@@ -177,7 +177,11 @@ function startBot() {
         console.log(`[msg] bot message from "${message.author.username}" (id:${message.author.id}) in ch:${message.channelId}`);
       }
       if (message.author.bot && message.author.username === 'Raider.IO') {
-        await handleRaiderIoMessage(message, store, { alwaysPingUserId });
+        try {
+          await handleRaiderIoMessage(message, store, { alwaysPingUserId });
+        } catch (e) {
+          console.error('[msg] handleRaiderIoMessage threw:', e);
+        }
       }
     })();
   });

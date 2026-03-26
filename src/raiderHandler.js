@@ -32,10 +32,15 @@ async function createAlertThread(channel) {
     autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
     reason: 'Raider.IO RU detector alert',
   };
-  if (channel.type === ChannelType.GuildText) {
-    return channel.threads.create({ ...base, type: ChannelType.PrivateThread });
+  try {
+    if (channel.type === ChannelType.GuildText) {
+      return await channel.threads.create({ ...base, type: ChannelType.PrivateThread });
+    }
+    return await channel.threads.create({ ...base, type: ChannelType.AnnouncementThread });
+  } catch (e) {
+    console.error('[createAlertThread] failed to create thread:', e);
+    throw e;
   }
-  return channel.threads.create({ ...base, type: ChannelType.AnnouncementThread });
 }
 
 /**
