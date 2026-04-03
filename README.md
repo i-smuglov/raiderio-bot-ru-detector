@@ -34,6 +34,9 @@ A Discord bot that monitors [Raider.IO](https://raider.io) group messages and al
    - Send Messages in Threads
    - Embed Links
    - Read Message History
+
+   For a manual invite URL, the same bitmask is **`343597468672`** (`permissions=` query parameter).
+
 4. Copy the generated URL, open it in a browser, and authorize for your server
 
 ### 3. Grant Channel Access
