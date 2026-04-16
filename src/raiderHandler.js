@@ -128,7 +128,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   }
 
   const strikes = await Promise.all(
-    suspectNames.map((name) => store.incrementStrike(name)),
+    suspectNames.map((name) => store.incrementStrike(guildId, name)),
   );
 
   const parts = suspectNames.map((name, i) => {
@@ -136,6 +136,11 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     const label = count === 1 ? 'strike' : 'strikes';
     return `${name} (${count} ${label})`;
   });
+
+  const reasonParts = roster
+    .filter((p) => CYRILLIC_REGEX.test(p.name) || (p.guildName && CYRILLIC_REGEX.test(p.guildName)))
+    .map((p) => `${p.name}-[${p.guildName ?? '—'}]`);
+  const reason = reasonParts.length ? reasonParts.join(', ') : '—';
 
   const mentionParts = [
     opts.alwaysPingUserId ? `<@${opts.alwaysPingUserId}>` : '',
@@ -145,7 +150,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
 
   const thread = await createAlertThread(message.channel);
   await thread.send({
-    content: `${mention}Imposter detected. ${parts.join(', ')}`,
+    content: `${mention}Imposter detected.\n${parts.join('\n')}.\nReason: ${reason}`,
     embeds: [embedFromMessageEmbed(embed)],
   });
 }
