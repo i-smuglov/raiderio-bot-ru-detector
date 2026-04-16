@@ -14,6 +14,12 @@ const commands = [
     )
     .addStringOption((o) =>
       o.setName('officer_role_id').setDescription('Discord role ID to ping').setRequired(false),
+    )
+    .addBooleanOption((o) =>
+      o
+        .setName('detect_guild_cyrillic')
+        .setDescription('Detect Cyrillic in guild names (default: false)')
+        .setRequired(false),
     ),
   new SlashCommandBuilder()
     .setName('info')

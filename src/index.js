@@ -67,13 +67,19 @@ async function handleInteraction(interaction) {
     if (commandName === 'setup') {
       const guildName = options.getString('guild_name');
       const officerRoleId = options.getString('officer_role_id');
-      /** @type {{ wow_guild_name?: string | null; officer_role_id?: string | null }} */
+      const detectGuildCyrillic = options.getBoolean('detect_guild_cyrillic');
+      /** @type {{ wow_guild_name?: string | null; officer_role_id?: string | null; detect_guild_cyrillic?: boolean | null }} */
       const patch = {};
       if (guildName !== null) patch.wow_guild_name = guildName;
       if (officerRoleId !== null) patch.officer_role_id = officerRoleId;
+      if (detectGuildCyrillic !== null) patch.detect_guild_cyrillic = detectGuildCyrillic;
       const s = await store.upsertSettings(guildId, patch);
       await interaction.reply({
-        content: `Guild Name: ${s.wow_guild_name ?? '—'}\nOfficer Role ID: ${s.officer_role_id ?? '—'}`,
+        content: [
+          `Guild Name: ${s.wow_guild_name ?? '—'}`,
+          `Officer Role ID: ${s.officer_role_id ?? '—'}`,
+          `Detect guild Cyrillic: ${s.detect_guild_cyrillic ? 'true' : 'false'}`,
+        ].join('\n'),
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -85,6 +91,7 @@ async function handleInteraction(interaction) {
         content: [
           `**WoW guild (tracked):** ${s?.wow_guild_name ?? '—'}`,
           `**Officer role ID:** ${s?.officer_role_id ?? '—'}`,
+          `**Detect guild Cyrillic:** ${s?.detect_guild_cyrillic ? 'true' : 'false'}`,
         ].join('\n'),
         flags: MessageFlags.Ephemeral,
       });

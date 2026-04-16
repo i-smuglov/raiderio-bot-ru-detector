@@ -71,6 +71,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   const settings = await store.getSettings(guildId);
   const wowGuildName = settings?.wow_guild_name ?? null;
   const canAlert = Boolean(opts.alwaysPingUserId || settings?.officer_role_id);
+  const detectGuildCyrillic = Boolean(settings?.detect_guild_cyrillic);
 
   if (!canAlert) {
     logDebug(tag, 'skip: alert would ping nobody (no officer_role_id, no alwaysPingUserId)');
@@ -100,11 +101,17 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
-  const hasCyrillic = runHasCyrillic(CYRILLIC_REGEX, roster);
+  const hasCyrillic = detectGuildCyrillic
+    ? runHasCyrillic(CYRILLIC_REGEX, roster)
+    : roster.some((p) => CYRILLIC_REGEX.test(p.name));
   logDebug(tag, `hasCyrillic (run-details): ${hasCyrillic}`);
   if (LOG_LEVEL === 'debug') {
     const hits = roster
-      .filter((p) => CYRILLIC_REGEX.test(p.name) || (p.guildName && CYRILLIC_REGEX.test(p.guildName)))
+      .filter((p) =>
+        detectGuildCyrillic
+          ? (CYRILLIC_REGEX.test(p.name) || (p.guildName && CYRILLIC_REGEX.test(p.guildName)))
+          : CYRILLIC_REGEX.test(p.name),
+      )
       .map((p) => `${p.name}${p.guildName ? ` [${p.guildName}]` : ''}`);
     if (hits.length) logDebug(tag, `cyrillicHits: ${hits.join(', ')}`);
   }
@@ -128,7 +135,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   }
 
   const strikes = await Promise.all(
-    suspectNames.map((name) => store.incrementStrike(guildId, name)),
+    suspectNames.map((name) => store.incrementStrike(name)),
   );
 
   const parts = suspectNames.map((name, i) => {
@@ -138,7 +145,11 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   });
 
   const reasonParts = roster
-    .filter((p) => CYRILLIC_REGEX.test(p.name) || (p.guildName && CYRILLIC_REGEX.test(p.guildName)))
+    .filter((p) =>
+      detectGuildCyrillic
+        ? (CYRILLIC_REGEX.test(p.name) || (p.guildName && CYRILLIC_REGEX.test(p.guildName)))
+        : CYRILLIC_REGEX.test(p.name),
+    )
     .map((p) => `${p.name}-[${p.guildName ?? '—'}]`);
   const reason = reasonParts.length ? reasonParts.join(', ') : '—';
 

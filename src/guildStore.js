@@ -7,7 +7,7 @@ export class GuildStore {
   /** @param {string} discordGuildId */
   async getSettings(discordGuildId) {
     const r = await this.pool.query(
-      `select discord_guild_id, wow_guild_name, officer_role_id
+      `select discord_guild_id, wow_guild_name, officer_role_id, detect_guild_cyrillic
        from discord_guild_settings
        where discord_guild_id = $1`,
       [discordGuildId],
@@ -17,7 +17,7 @@ export class GuildStore {
 
   /**
    * @param {string} discordGuildId
-   * @param {{ wow_guild_name?: string | null; officer_role_id?: string | null }} patch
+   * @param {{ wow_guild_name?: string | null; officer_role_id?: string | null; detect_guild_cyrillic?: boolean | null }} patch
    */
   async upsertSettings(discordGuildId, patch) {
     const current = await this.getSettings(discordGuildId);
@@ -29,16 +29,21 @@ export class GuildStore {
       patch.officer_role_id !== undefined
         ? patch.officer_role_id
         : (current?.officer_role_id ?? null);
+    const detect_guild_cyrillic =
+      patch.detect_guild_cyrillic !== undefined
+        ? (patch.detect_guild_cyrillic ?? false)
+        : (current?.detect_guild_cyrillic ?? false);
 
     const r = await this.pool.query(
-      `insert into discord_guild_settings (discord_guild_id, wow_guild_name, officer_role_id, updated_at)
-       values ($1, $2, $3, now())
+      `insert into discord_guild_settings (discord_guild_id, wow_guild_name, officer_role_id, detect_guild_cyrillic, updated_at)
+       values ($1, $2, $3, $4, now())
        on conflict (discord_guild_id) do update set
          wow_guild_name = excluded.wow_guild_name,
          officer_role_id = excluded.officer_role_id,
+         detect_guild_cyrillic = excluded.detect_guild_cyrillic,
          updated_at = now()
-       returning discord_guild_id, wow_guild_name, officer_role_id`,
-      [discordGuildId, wow_guild_name, officer_role_id],
+       returning discord_guild_id, wow_guild_name, officer_role_id, detect_guild_cyrillic`,
+      [discordGuildId, wow_guild_name, officer_role_id, detect_guild_cyrillic],
     );
     const row = r.rows[0];
     if (!row) throw new Error('upsertSettings returned no row');

@@ -4,8 +4,13 @@ create table if not exists discord_guild_settings (
   discord_guild_id text primary key,
   wow_guild_name text,
   officer_role_id text,
+  detect_guild_cyrillic boolean not null default false,
   updated_at timestamptz not null default now()
 );
+
+-- Migration: add detect_guild_cyrillic to existing installs.
+alter table discord_guild_settings
+  add column if not exists detect_guild_cyrillic boolean not null default false;
 
 
 create table if not exists player_strikes (
