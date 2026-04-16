@@ -9,9 +9,37 @@ create table if not exists discord_guild_settings (
 
 
 create table if not exists player_strikes (
-  discord_guild_id text not null,
   player_name text not null,
   strikes integer not null default 0,
   updated_at timestamptz not null default now(),
-  primary key (discord_guild_id, player_name)
+  primary key (player_name)
 );
+
+-- Migration: legacy `player_strikes` used (discord_guild_id, player_name) as PK.
+-- We aggregate strikes across guilds and then make strikes global per player_name.
+do $$
+begin
+  if to_regclass('public.player_strikes') is null then
+    return;
+  end if;
+
+  -- Snapshot current data (works for both legacy and already-migrated shapes).
+  create temp table _player_strikes_agg as
+    select
+      player_name,
+      sum(strikes)::integer as strikes,
+      max(updated_at) as updated_at
+    from player_strikes
+    group by player_name;
+
+  -- Rebuild table shape and PK.
+  alter table player_strikes drop constraint if exists player_strikes_pkey;
+  alter table player_strikes drop column if exists discord_guild_id;
+  truncate table player_strikes;
+
+  insert into player_strikes (player_name, strikes, updated_at)
+  select player_name, strikes, updated_at
+  from _player_strikes_agg;
+
+  alter table player_strikes add constraint player_strikes_pkey primary key (player_name);
+end $$;

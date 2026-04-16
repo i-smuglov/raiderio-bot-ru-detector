@@ -45,17 +45,17 @@ export class GuildStore {
     return row;
   }
 
-  /** @param {string} discordGuildId @param {string} playerName */
-  async incrementStrike(discordGuildId, playerName) {
+  /** @param {string} playerName */
+  async incrementStrike(playerName) {
     const r = await this.pool.query(
-      `insert into player_strikes (discord_guild_id, player_name, strikes)
-       values ($1, $2, 1)
-       on conflict (discord_guild_id, player_name)
+      `insert into player_strikes (player_name, strikes)
+       values ($1, 1)
+       on conflict (player_name)
        do update set
          strikes = player_strikes.strikes + 1,
          updated_at = now()
        returning strikes`,
-      [discordGuildId, playerName],
+      [playerName],
     );
     const row = r.rows[0];
     if (!row) throw new Error('incrementStrike returned no row');

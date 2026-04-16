@@ -11,6 +11,11 @@ import { GuildStore } from './guildStore.js';
 import { registerSlashCommands } from './registerCommands.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
 
+const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
+const logDebug = (...args) => {
+  if (LOG_LEVEL === 'debug') console.log(...args);
+};
+
 /**
  * Bind HTTP first and only then run DB/Discord startup.
  * Railway probes `/` immediately; if createPool() throws before listen(), health never comes up.
@@ -178,8 +183,8 @@ function startBot() {
 
   client.on(Events.MessageCreate, (message) => {
     void (async () => {
-      console.log(`[msg] from "${message.author.username}" bot=${message.author.bot} guild=${message.guildId ?? 'none'} ch=${message.channelId}`);
-      if (!message.guild || !store) { console.log('[msg] skip: no guild or store'); return; }
+      logDebug(`[msg] from "${message.author.username}" bot=${message.author.bot} guild=${message.guildId ?? 'none'} ch=${message.channelId}`);
+      if (!message.guild || !store) { logDebug('[msg] skip: no guild or store'); return; }
       const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
       if (message.author.bot && message.author.username === 'Raider.IO') {
         try {

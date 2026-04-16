@@ -3,13 +3,19 @@ import {
   ThreadAutoArchiveDuration,
 } from 'discord.js';
 import {
-  namesAndRealms,
-  ensureGuildsResolved,
-  suspectNamesMatchingGuild,
+  parseRunFromDescription,
+  fetchRunDetails,
+  rosterFromRunDetails,
+  runHasCyrillic,
+  trackedMembersInRoster,
   embedFromMessageEmbed,
 } from './helper.js';
 
 const CYRILLIC_REGEX = /[а-яА-Я]/;
+const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
+const logDebug = (...args) => {
+  if (LOG_LEVEL === 'debug') console.log(...args);
+};
 
 /**
  * @param {import('discord.js').Message['channel']} ch
@@ -51,46 +57,78 @@ async function createAlertThread(channel) {
 export async function handleRaiderIoMessage(message, store, opts = {}) {
   const tag = `[raider-handler][ch:${message.channelId}]`;
 
-  if (!message.guild) { console.log(tag, 'skip: no guild'); return; }
-  if (!isRaidEmbedChannel(message.channel)) { console.log(tag, 'skip: channel type', message.channel.type); return; }
+  if (!message.guild) { logDebug(tag, 'skip: no guild'); return; }
+  if (!isRaidEmbedChannel(message.channel)) { logDebug(tag, 'skip: channel type', message.channel.type); return; }
 
   const embed = message.embeds[0];
-  if (!embed) { console.log(tag, 'skip: no embed'); return; }
+  if (!embed) { logDebug(tag, 'skip: no embed'); return; }
 
   const description = embed.description;
-  if (!description) { console.log(tag, 'skip: no description'); return; }
+  if (!description) { logDebug(tag, 'skip: no description'); return; }
 
   const guildId = message.guild.id;
-  const pairs = namesAndRealms(description);
-  console.log(tag, `pairs found: ${pairs.length}`, pairs.map(([r, n]) => `${n}@${r}`).join(', '));
-  if (pairs.length === 0) { console.log(tag, 'skip: no player pairs parsed'); return; }
 
-  const hasCyrillic = CYRILLIC_REGEX.test(description);
-  console.log(tag, `hasCyrillic: ${hasCyrillic}`);
+  const settings = await store.getSettings(guildId);
+  const wowGuildName = settings?.wow_guild_name ?? null;
+  const canAlert = Boolean(opts.alwaysPingUserId || settings?.officer_role_id);
+
+  if (!canAlert) {
+    logDebug(tag, 'skip: alert would ping nobody (no officer_role_id, no alwaysPingUserId)');
+    return;
+  }
+
+  if (!wowGuildName) {
+    logDebug(tag, 'skip: wow_guild_name not configured (run /setup)');
+    return;
+  }
+
+  const run = parseRunFromDescription(description);
+  if (!run) {
+    logDebug(tag, 'skip: no run link found in embed description');
+    return;
+  }
+
+  const body = await fetchRunDetails(run.season, run.id);
+  if (!body) {
+    logDebug(tag, `skip: failed to fetch run-details season=${run.season} id=${run.id}`);
+    return;
+  }
+
+  const roster = rosterFromRunDetails(body);
+  if (roster.length === 0) {
+    logDebug(tag, `skip: run-details returned empty roster season=${run.season} id=${run.id}`);
+    return;
+  }
+
+  const hasCyrillic = runHasCyrillic(CYRILLIC_REGEX, roster);
+  logDebug(tag, `hasCyrillic (run-details): ${hasCyrillic}`);
+  if (LOG_LEVEL === 'debug') {
+    const hits = roster
+      .filter((p) => CYRILLIC_REGEX.test(p.name) || (p.guildName && CYRILLIC_REGEX.test(p.guildName)))
+      .map((p) => `${p.name}${p.guildName ? ` [${p.guildName}]` : ''}`);
+    if (hits.length) logDebug(tag, `cyrillicHits: ${hits.join(', ')}`);
+  }
 
   if (!hasCyrillic) {
-    if (!opts.alwaysPingUserId) { console.log(tag, 'skip: no cyrillic, no alwaysPingUserId'); return; }
+    if (!opts.alwaysPingUserId) { logDebug(tag, 'skip: no cyrillic (run-details), no alwaysPingUserId'); return; }
     const thread = await createAlertThread(message.channel);
     await thread.send({
-      content: `<@${opts.alwaysPingUserId}> No Cyrillic detected.`,
+      content: `<@${opts.alwaysPingUserId}> No Cyrillic detected (run-details).`,
       embeds: [embedFromMessageEmbed(embed)],
     });
     return;
   }
 
-  /** @type {Map<string, string | null>} */
-  const guildByPair = new Map();
-  await ensureGuildsResolved(pairs, guildByPair);
-  console.log(tag, 'guildByPair:', [...guildByPair.entries()].map(([k, v]) => `${k}=${v}`).join(', '));
+  const suspectNames = trackedMembersInRoster(wowGuildName, roster);
+  logDebug(tag, `suspectNames: ${suspectNames.join(', ') || '(none)'}`);
 
-  const settings = await store.getSettings(guildId);
-  const wowGuildName = settings?.wow_guild_name ?? null;
-  console.log(tag, `wowGuildName: ${wowGuildName}`);
-  const suspectNames = suspectNamesMatchingGuild(wowGuildName, pairs, guildByPair);
-  console.log(tag, `suspectNames: ${suspectNames.join(', ') || '(none)'}`);
+  if (suspectNames.length === 0) {
+    logDebug(tag, 'skip: no tracked guild members found in this run roster');
+    return;
+  }
 
   const strikes = await Promise.all(
-    suspectNames.map((name) => store.incrementStrike(guildId, name)),
+    suspectNames.map((name) => store.incrementStrike(name)),
   );
 
   const parts = suspectNames.map((name, i) => {
