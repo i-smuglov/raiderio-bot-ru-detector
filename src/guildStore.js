@@ -66,4 +66,41 @@ export class GuildStore {
     if (!row) throw new Error('incrementStrike returned no row');
     return row.strikes;
   }
+
+  /**
+   * Increment strikes for multiple players in a single query.
+   * Input is expected to be unique per run (no duplicates).
+   *
+   * @param {string[]} playerNames
+   * @returns {Promise<number[]>} strike counts for each input name
+   */
+  async incrementStrikes(playerNames) {
+    if (playerNames.length === 0) return [];
+
+    const r = await this.pool.query(
+      `with input as (
+         select
+           name as player_name,
+           ord::int as ord
+         from unnest($1::text[]) with ordinality as t(name, ord)
+       ),
+       upserted as (
+         insert into player_strikes (player_name, strikes)
+         select player_name, 1
+         from input
+         on conflict (player_name)
+         do update set
+           strikes = player_strikes.strikes + 1,
+           updated_at = now()
+         returning player_name, strikes
+       )
+       select u.strikes
+       from input i
+       join upserted u using (player_name)
+       order by i.ord`,
+      [playerNames],
+    );
+
+    return r.rows.map((row) => row?.strikes ?? 0);
+  }
 }

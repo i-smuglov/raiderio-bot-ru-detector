@@ -134,11 +134,11 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
-  const strikes = await Promise.all(
-    suspectNames.map((name) => store.incrementStrike(name)),
-  );
+  // Once per run per player (avoid double-increment if the same name appears twice).
+  const uniqSuspectNames = [...new Set(suspectNames)];
+  const strikes = await store.incrementStrikes(uniqSuspectNames);
 
-  const parts = suspectNames.map((name, i) => {
+  const parts = uniqSuspectNames.map((name, i) => {
     const count = strikes[i] ?? 0;
     const label = count === 1 ? 'strike' : 'strikes';
     return `${name} (${count} ${label})`;
