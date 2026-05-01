@@ -9,6 +9,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName('setup')
     .setDescription('Configure tracked WoW guild and officer role')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addStringOption((o) =>
       o.setName('guild_name').setDescription('WoW guild name (Raider.io)').setRequired(false),
     )
@@ -23,17 +24,19 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('info')
-    .setDescription('Show saved setup'),
+    .setDescription('Show saved setup')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
   new SlashCommandBuilder()
     .setName('catchup')
     .setDescription('Dry-run scan messages until the first threaded one')
+    // No default permissions: allow everyone to see/run `/catchup`.
     .addIntegerOption((o) =>
       o
         .setName('max_messages')
         .setDescription('Maximum messages to scan (default: 2000)')
         .setRequired(false),
     ),
-].map((c) => c.setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON());
+].map((c) => c.toJSON());
 
 /**
  * @param {string} token
