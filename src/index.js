@@ -209,6 +209,11 @@ function startBot() {
   }
 
   pool = createPool();
+  // If an idle client errors (e.g. Postgres restart), pg emits an 'error' event on the pool.
+  // Without a listener Node treats it as unhandled and crashes the process.
+  pool.on('error', (err) => {
+    console.warn(`[db] pool error: ${errorOneLine(err)}`);
+  });
   store = new GuildStore(pool);
   stopKeepalive = startDbKeepalive(pool);
 
