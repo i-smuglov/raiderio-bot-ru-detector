@@ -45,8 +45,8 @@ let pool;
 /** @type {GuildStore | undefined} */
 let store;
 let token = '';
-/** @type {NodeJS.Timeout | undefined} */
-let keepaliveTimer;
+/** @type {(() => void) | undefined} */
+let stopKeepalive;
 
 const client = new Client({
   intents: [
@@ -210,7 +210,7 @@ function startBot() {
 
   pool = createPool();
   store = new GuildStore(pool);
-  keepaliveTimer = startDbKeepalive(pool);
+  stopKeepalive = startDbKeepalive(pool);
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Logged in as ${c.user.tag}`);
@@ -253,10 +253,11 @@ function startBot() {
 
 /**
  * Run a cheap query periodically to keep the service + DB warm.
- * Returns the timer so shutdown() can clear it.
+ * Returns a stop function so shutdown() can cancel it.
  *
  * Env:
  * - DB_KEEPALIVE_MS: interval in ms (default 300000 / 5 min). Set 0 to disable.
+ * - DB_KEEPALIVE_RETRY_MS: interval in ms while DB is down (default 10000 / 10s).
  *
  * @param {import('pg').Pool} p
  */
@@ -269,17 +270,57 @@ function startDbKeepalive(p) {
   }
   if (ms === 0) return undefined;
 
-  console.log(`[keepalive] DB ping every ${Math.round(ms / 1000)}s`);
-  return setInterval(() => {
-    void (async () => {
-      try {
-        await p.query('SELECT 1');
-        logDebug('[keepalive] db ok');
-      } catch (e) {
-        console.warn('[keepalive] db ping failed:', e);
-      }
-    })();
-  }, ms);
+  const retryMsRaw = (process.env.DB_KEEPALIVE_RETRY_MS ?? '10000').trim();
+  const retryMs = Number(retryMsRaw);
+  if (!Number.isFinite(retryMs) || retryMs <= 0) {
+    console.warn(
+      `[keepalive] invalid DB_KEEPALIVE_RETRY_MS="${retryMsRaw}", disabling keepalive`,
+    );
+    return undefined;
+  }
+
+  console.log(
+    `[keepalive] DB ping every ${Math.round(ms / 1000)}s (retry ${Math.round(retryMs / 1000)}s until ok)`,
+  );
+
+  /** @type {NodeJS.Timeout | undefined} */
+  let timer;
+  let stopped = false;
+  let failures = 0;
+  /** @type {'normal' | 'retry'} */
+  let mode = 'normal';
+
+  const schedule = (delayMs) => {
+    if (stopped) return;
+    timer = setTimeout(() => void tick(), delayMs);
+  };
+
+  const tick = async () => {
+    if (stopped) return;
+
+    try {
+      await p.query('SELECT 1');
+      failures = 0;
+      console.log(`[keepalive] db ok (${mode})`);
+      mode = 'normal';
+      schedule(ms);
+      return;
+    } catch (e) {
+      failures += 1;
+      const msg = errorOneLine(e);
+      console.warn(`[keepalive] db ping failed (x${failures}, ${mode}): ${msg}`);
+      mode = 'retry';
+      schedule(retryMs);
+    }
+  };
+
+  // First attempt immediately.
+  schedule(0);
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 /**
@@ -287,7 +328,7 @@ function startDbKeepalive(p) {
  */
 async function shutdown(signal) {
   console.log(`${signal} received, closing DB pool`);
-  if (keepaliveTimer) clearInterval(keepaliveTimer);
+  if (stopKeepalive) stopKeepalive();
   if (pool) await pool.end().catch(() => {});
   process.exit(0);
 }
