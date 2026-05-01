@@ -29,7 +29,9 @@ const commands = [
   new SlashCommandBuilder()
     .setName('catchup')
     .setDescription('Dry-run scan messages until the first threaded one')
-    // No default permissions: allow everyone to see/run `/catchup`.
+    // Explicitly allow everyone to see/run `/catchup`.
+    // (Discord interprets "default_member_permissions: null" as "no restriction".)
+    .setDefaultMemberPermissions(null)
     .addIntegerOption((o) =>
       o
         .setName('max_messages')
@@ -49,7 +51,21 @@ export async function registerSlashCommands(token, applicationId) {
     await rest.put(Routes.applicationGuildCommands(applicationId, guildId), {
       body: commands,
     });
+    const after = await rest.get(Routes.applicationGuildCommands(applicationId, guildId));
+    console.log(
+      '[commands] guild registered:',
+      Array.isArray(after)
+        ? after.map((c) => `${c.name} perms=${c.default_member_permissions ?? 'null'}`).join(', ')
+        : after,
+    );
   } else {
     await rest.put(Routes.applicationCommands(applicationId), { body: commands });
+    const after = await rest.get(Routes.applicationCommands(applicationId));
+    console.log(
+      '[commands] global registered:',
+      Array.isArray(after)
+        ? after.map((c) => `${c.name} perms=${c.default_member_permissions ?? 'null'}`).join(', ')
+        : after,
+    );
   }
 }
