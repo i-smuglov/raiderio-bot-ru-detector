@@ -45,6 +45,8 @@ let pool;
 /** @type {GuildStore | undefined} */
 let store;
 let token = '';
+/** @type {NodeJS.Timeout | undefined} */
+let keepaliveTimer;
 
 const client = new Client({
   intents: [
@@ -208,6 +210,7 @@ function startBot() {
 
   pool = createPool();
   store = new GuildStore(pool);
+  keepaliveTimer = startDbKeepalive(pool);
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Logged in as ${c.user.tag}`);
@@ -249,10 +252,42 @@ function startBot() {
 }
 
 /**
+ * Run a cheap query periodically to keep the service + DB warm.
+ * Returns the timer so shutdown() can clear it.
+ *
+ * Env:
+ * - DB_KEEPALIVE_MS: interval in ms (default 300000 / 5 min). Set 0 to disable.
+ *
+ * @param {import('pg').Pool} p
+ */
+function startDbKeepalive(p) {
+  const msRaw = (process.env.DB_KEEPALIVE_MS ?? '300000').trim();
+  const ms = Number(msRaw);
+  if (!Number.isFinite(ms) || ms < 0) {
+    console.warn(`[keepalive] invalid DB_KEEPALIVE_MS="${msRaw}", disabling keepalive`);
+    return undefined;
+  }
+  if (ms === 0) return undefined;
+
+  console.log(`[keepalive] DB ping every ${Math.round(ms / 1000)}s`);
+  return setInterval(() => {
+    void (async () => {
+      try {
+        await p.query('SELECT 1');
+        logDebug('[keepalive] db ok');
+      } catch (e) {
+        console.warn('[keepalive] db ping failed:', e);
+      }
+    })();
+  }, ms);
+}
+
+/**
  * @param {string} signal
  */
 async function shutdown(signal) {
   console.log(`${signal} received, closing DB pool`);
+  if (keepaliveTimer) clearInterval(keepaliveTimer);
   if (pool) await pool.end().catch(() => {});
   process.exit(0);
 }
