@@ -83,6 +83,14 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
+  // If guild-mode is OFF, we only care about Cyrillic in the message itself (player names).
+  // Avoid Raider.IO API calls when the embed text already proves "no Cyrillic".
+  const hasCyrillicInMessage = CYRILLIC_REGEX.test(description);
+  if (!detectGuildCyrillic && !hasCyrillicInMessage) {
+    logDebug(tag, 'skip: guild-mode off and no Cyrillic in embed text (no API call)');
+    return;
+  }
+
   const run = parseRunFromDescription(description);
   if (!run) {
     logDebug(tag, 'skip: no run link found in embed description');
@@ -117,12 +125,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   }
 
   if (!hasCyrillic) {
-    if (!opts.alwaysPingUserId) { logDebug(tag, 'skip: no cyrillic (run-details), no alwaysPingUserId'); return; }
-    const thread = await createAlertThread(message.channel);
-    await thread.send({
-      content: `<@${opts.alwaysPingUserId}> No Cyrillic detected (run-details).`,
-      embeds: [embedFromMessageEmbed(embed)],
-    });
+    logDebug(tag, 'skip: no cyrillic (run-details)');
     return;
   }
 

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {
   Client,
+  ChannelType,
   Events,
   GatewayIntentBits,
   InteractionType,
@@ -10,6 +11,7 @@ import { createPool } from './dbPool.js';
 import { GuildStore } from './guildStore.js';
 import { registerSlashCommands } from './registerCommands.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
+import { catchupDryRunChannel } from './catchupDryRun.js';
 
 const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
 const logDebug = (...args) => {
@@ -95,6 +97,43 @@ async function handleInteraction(interaction) {
         ].join('\n'),
         flags: MessageFlags.Ephemeral,
       });
+      return;
+    }
+
+    if (commandName === 'catchup') {
+      const ch = interaction.channel;
+      if (!ch || (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement)) {
+        await interaction.reply({
+          content: 'Run `/catchup` in the Raider.IO feed channel (text/announcement channel).',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const maxMessages = options.getInteger('max_messages') ?? 2000;
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      const settings = await store.getSettings(guildId);
+      const res = await catchupDryRunChannel(ch, settings, { maxMessages });
+
+      const header = [
+        `Channel: <#${ch.id}>`,
+        `Scanned: ${res.scanned}`,
+        `Stop: ${res.stopReason}`,
+        `Flagged (dry-run): ${res.flagged.length}`,
+      ].join('\n');
+
+      const lines = res.flagged
+        .slice(0, 20)
+        .map((f) => `- ${f.createdAt} ${f.url}\n  ${f.reason}`);
+
+      const tail =
+        res.flagged.length > 20
+          ? `\n\nShowing first 20. Total flagged: ${res.flagged.length}`
+          : '';
+
+      const content = `${header}\n\n${lines.join('\n')}${tail}`.slice(0, 2000);
+      await interaction.editReply({ content: content || header.slice(0, 2000) });
       return;
     }
 

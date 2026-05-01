@@ -24,6 +24,15 @@ const commands = [
   new SlashCommandBuilder()
     .setName('info')
     .setDescription('Show saved setup'),
+  new SlashCommandBuilder()
+    .setName('catchup')
+    .setDescription('Dry-run scan messages until the first threaded one')
+    .addIntegerOption((o) =>
+      o
+        .setName('max_messages')
+        .setDescription('Maximum messages to scan (default: 2000)')
+        .setRequired(false),
+    ),
 ].map((c) => c.setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON());
 
 /**
