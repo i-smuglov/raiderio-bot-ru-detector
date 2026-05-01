@@ -2,6 +2,9 @@ import http from 'node:http';
 import {
   Client,
   ChannelType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Events,
   GatewayIntentBits,
   InteractionType,
@@ -11,7 +14,7 @@ import { createPool } from './dbPool.js';
 import { GuildStore } from './guildStore.js';
 import { registerSlashCommands } from './registerCommands.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
-import { catchupDryRunChannel } from './catchupDryRun.js';
+import { catchupExecute, catchupPreview } from './catchup.js';
 
 const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
 const logDebug = (...args) => {
@@ -61,7 +64,51 @@ const client = new Client({
  */
 async function handleInteraction(interaction) {
   if (!store) return;
-  if (interaction.type !== InteractionType.ApplicationCommand || !interaction.inGuild()) return;
+  if (!interaction.inGuild()) return;
+
+  // Button interactions (used by /catchup confirm).
+  if (interaction.isButton()) {
+    const guildId = interaction.guildId;
+    if (!guildId) return;
+    const [kind, daysStr, userId] = String(interaction.customId || '').split(':');
+    if (kind !== 'catchup_confirm') return;
+    if (userId && interaction.user.id !== userId) {
+      await interaction.reply({
+        content: 'This confirmation button belongs to someone else. Run `/catchup` yourself.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const days = Math.max(1, Math.min(365, Number(daysStr || 0) || 7));
+    const ch = interaction.channel;
+    if (!ch || (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement)) {
+      await interaction.reply({
+        content: 'Run `/catchup` in the Raider.IO feed channel (text/announcement channel).',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+    const res = await catchupExecute(ch, store, { days, alwaysPingUserId });
+
+    await interaction.editReply({
+      content: [
+        `Channel: <#${ch.id}>`,
+        `Days: ${days}`,
+        `Cutoff: ${res.cutoff.toISOString()}`,
+        `Scanned: ${res.scanned} (in range: ${res.inRange})`,
+        `Already threaded (skipped): ${res.alreadyThreaded}`,
+        `Attempted handler calls: ${res.attempted}`,
+        `Stop: ${res.stopReason}`,
+      ].join('\n').slice(0, 2000),
+    });
+    return;
+  }
+
+  if (interaction.type !== InteractionType.ApplicationCommand) return;
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName, guildId, options } = interaction;
@@ -112,30 +159,33 @@ async function handleInteraction(interaction) {
         return;
       }
 
-      const maxMessages = options.getInteger('max_messages') ?? 2000;
+      const days = Math.max(1, Math.min(365, options.getInteger('days') ?? 7));
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      const settings = await store.getSettings(guildId);
-      const res = await catchupDryRunChannel(ch, settings, { maxMessages });
+      const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+      const preview = await catchupPreview(ch, store, { days, alwaysPingUserId });
 
-      const header = [
-        `Channel: <#${ch.id}>`,
-        `Scanned: ${res.scanned}`,
-        `Stop: ${res.stopReason}`,
-        `Flagged (dry-run): ${res.flagged.length}`,
-      ].join('\n');
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`catchup_confirm:${days}:${interaction.user.id}`)
+          .setLabel('Confirm')
+          .setStyle(ButtonStyle.Danger),
+      );
 
-      const lines = res.flagged
-        .slice(0, 20)
-        .map((f) => `- ${f.createdAt} ${f.url}\n  ${f.reason}`);
-
-      const tail =
-        res.flagged.length > 20
-          ? `\n\nShowing first 20. Total flagged: ${res.flagged.length}`
-          : '';
-
-      const content = `${header}\n\n${lines.join('\n')}${tail}`.slice(0, 2000);
-      await interaction.editReply({ content: content || header.slice(0, 2000) });
+      await interaction.editReply({
+        content: [
+          `Channel: <#${ch.id}>`,
+          `Days: ${days}`,
+          `Cutoff: ${preview.cutoff.toISOString()}`,
+          `Scanned: ${preview.scanned} (in range: ${preview.inRange})`,
+          `Already threaded (will be skipped): ${preview.alreadyThreaded}`,
+          `Candidates (unthreaded Raider.IO posts): ${preview.candidates}`,
+          `Stop: ${preview.stopReason}`,
+          '',
+          'Press **Confirm** to create missing alert threads by running the normal detection procedure.',
+        ].join('\n').slice(0, 2000),
+        components: [row],
+      });
       return;
     }
 

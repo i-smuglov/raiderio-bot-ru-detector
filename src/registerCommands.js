@@ -28,14 +28,14 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
   new SlashCommandBuilder()
     .setName('catchup')
-    .setDescription('Dry-run scan messages until the first threaded one')
+    .setDescription('Scan last N days and create missing alert threads')
     // Explicitly allow everyone to see/run `/catchup`.
     // (Discord interprets "default_member_permissions: null" as "no restriction".)
     .setDefaultMemberPermissions(null)
     .addIntegerOption((o) =>
       o
-        .setName('max_messages')
-        .setDescription('Maximum messages to scan (default: 2000)')
+        .setName('days')
+        .setDescription('How many days back to scan (default: 7)')
         .setRequired(false),
     ),
 ].map((c) => c.toJSON());
