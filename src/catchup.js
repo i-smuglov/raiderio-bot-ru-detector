@@ -2,6 +2,16 @@ import { ChannelType } from 'discord.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
 
 /**
+ * Ensure deterministic newest→older iteration.
+ * Discord.js collections should already be ordered, but relying on it can cause pagination loops.
+ *
+ * @param {import('discord.js').Collection<string, import('discord.js').Message<boolean>>} batch
+ */
+function messagesNewestFirst(batch) {
+  return [...batch.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+}
+
+/**
  * @param {import('discord.js').TextChannel | import('discord.js').NewsChannel} channel
  * @param {number} days
  * @returns {Date}
@@ -23,6 +33,8 @@ export async function catchupPreview(channel, store, opts) {
 
   const maxMessages = Math.max(1, Math.min(50_000, Number(opts.maxMessages ?? 20_000)));
   const cutoff = cutoffDate(opts.days);
+  const startedAt = Date.now();
+  const maxRuntimeMs = 5 * 60 * 1000;
 
   let scanned = 0;
   let inRange = 0;
@@ -34,15 +46,20 @@ export async function catchupPreview(channel, store, opts) {
   let before;
 
   while (scanned < maxMessages) {
+    if (Date.now() - startedAt > maxRuntimeMs) {
+      stopReason = `hit runtime cap (${Math.round(maxRuntimeMs / 1000)}s)`;
+      break;
+    }
     const remaining = maxMessages - scanned;
     const limit = Math.max(1, Math.min(100, remaining));
     const batch = await channel.messages.fetch({ limit, ...(before ? { before } : {}) });
     if (batch.size === 0) { stopReason = 'reached channel start'; break; }
 
-    for (const msg of batch.values()) {
-      scanned += 1;
-      before = msg.id;
+    const msgs = messagesNewestFirst(batch);
+    before = msgs[msgs.length - 1]?.id;
 
+    for (const msg of msgs) {
+      scanned += 1;
       if (msg.createdAt < cutoff) { stopReason = `reached cutoff (${cutoff.toISOString()})`; return { scanned, inRange, alreadyThreaded, candidates, stopReason, cutoff }; }
       inRange += 1;
 
@@ -67,7 +84,19 @@ export async function catchupPreview(channel, store, opts) {
  *
  * @param {import('discord.js').TextChannel | import('discord.js').NewsChannel} channel
  * @param {import('./guildStore.js').GuildStore} store
- * @param {{ days: number; maxMessages?: number; alwaysPingUserId?: string }} opts
+ * @param {{
+ *  days: number;
+ *  maxMessages?: number;
+ *  alwaysPingUserId?: string;
+ *  onProgress?: (p: {
+ *    scanned: number;
+ *    inRange: number;
+ *    alreadyThreaded: number;
+ *    attempted: number;
+ *    cutoff: Date;
+ *    runningForMs: number;
+ *  }) => Promise<void> | void;
+ * }} opts
  */
 export async function catchupExecute(channel, store, opts) {
   if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
@@ -76,6 +105,10 @@ export async function catchupExecute(channel, store, opts) {
 
   const maxMessages = Math.max(1, Math.min(50_000, Number(opts.maxMessages ?? 20_000)));
   const cutoff = cutoffDate(opts.days);
+  const startedAt = Date.now();
+  const maxRuntimeMs = 15 * 60 * 1000;
+  const progressEveryMs = 5000;
+  let lastProgressAt = 0;
 
   let scanned = 0;
   let inRange = 0;
@@ -87,15 +120,31 @@ export async function catchupExecute(channel, store, opts) {
   let before;
 
   while (scanned < maxMessages) {
+    if (opts.onProgress && Date.now() - lastProgressAt > progressEveryMs) {
+      lastProgressAt = Date.now();
+      await opts.onProgress({
+        scanned,
+        inRange,
+        alreadyThreaded,
+        attempted,
+        cutoff,
+        runningForMs: Date.now() - startedAt,
+      });
+    }
+    if (Date.now() - startedAt > maxRuntimeMs) {
+      stopReason = `hit runtime cap (${Math.round(maxRuntimeMs / 1000)}s)`;
+      break;
+    }
     const remaining = maxMessages - scanned;
     const limit = Math.max(1, Math.min(100, remaining));
     const batch = await channel.messages.fetch({ limit, ...(before ? { before } : {}) });
     if (batch.size === 0) { stopReason = 'reached channel start'; break; }
 
-    for (const msg of batch.values()) {
-      scanned += 1;
-      before = msg.id;
+    const msgs = messagesNewestFirst(batch);
+    before = msgs[msgs.length - 1]?.id;
 
+    for (const msg of msgs) {
+      scanned += 1;
       if (msg.createdAt < cutoff) { stopReason = `reached cutoff (${cutoff.toISOString()})`; return { scanned, inRange, alreadyThreaded, attempted, stopReason, cutoff }; }
       inRange += 1;
 
@@ -106,6 +155,17 @@ export async function catchupExecute(channel, store, opts) {
       attempted += 1;
       await handleRaiderIoMessage(msg, store, { alwaysPingUserId: opts.alwaysPingUserId });
     }
+  }
+
+  if (opts.onProgress) {
+    await opts.onProgress({
+      scanned,
+      inRange,
+      alreadyThreaded,
+      attempted,
+      cutoff,
+      runningForMs: Date.now() - startedAt,
+    });
   }
 
   return { scanned, inRange, alreadyThreaded, attempted, stopReason, cutoff };

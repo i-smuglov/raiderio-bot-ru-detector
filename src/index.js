@@ -48,8 +48,6 @@ let pool;
 /** @type {GuildStore | undefined} */
 let store;
 let token = '';
-/** @type {(() => void) | undefined} */
-let stopKeepalive;
 
 const client = new Client({
   intents: [
@@ -92,7 +90,30 @@ async function handleInteraction(interaction) {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
-    const res = await catchupExecute(ch, store, { days, alwaysPingUserId });
+    let lastEditAt = 0;
+    const res = await catchupExecute(ch, store, {
+      days,
+      alwaysPingUserId,
+      onProgress: async (p) => {
+        // Throttle edits to avoid rate limits.
+        if (Date.now() - lastEditAt < 5000) return;
+        lastEditAt = Date.now();
+        const seconds = Math.round(p.runningForMs / 1000);
+        await interaction.editReply({
+          content: [
+            `Channel: <#${ch.id}>`,
+            `Days: ${days}`,
+            `Cutoff: ${p.cutoff.toISOString()}`,
+            `Running: ${seconds}s`,
+            `Scanned: ${p.scanned} (in range: ${p.inRange})`,
+            `Already threaded (skipped): ${p.alreadyThreaded}`,
+            `Attempted handler calls: ${p.attempted}`,
+            '',
+            '(working...)',
+          ].join('\n').slice(0, 2000),
+        }).catch(() => {});
+      },
+    });
 
     await interaction.editReply({
       content: [
@@ -265,7 +286,6 @@ function startBot() {
     console.warn(`[db] pool error: ${errorOneLine(err)}`);
   });
   store = new GuildStore(pool);
-  stopKeepalive = startDbKeepalive(pool);
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Logged in as ${c.user.tag}`);
@@ -307,83 +327,10 @@ function startBot() {
 }
 
 /**
- * Run a cheap query periodically to keep the service + DB warm.
- * Returns a stop function so shutdown() can cancel it.
- *
- * Env:
- * - DB_KEEPALIVE_MS: interval in ms (default 300000 / 5 min). Set 0 to disable.
- * - DB_KEEPALIVE_RETRY_MS: interval in ms while DB is down (default 10000 / 10s).
- *
- * @param {import('pg').Pool} p
- */
-function startDbKeepalive(p) {
-  const msRaw = (process.env.DB_KEEPALIVE_MS ?? '300000').trim();
-  const ms = Number(msRaw);
-  if (!Number.isFinite(ms) || ms < 0) {
-    console.warn(`[keepalive] invalid DB_KEEPALIVE_MS="${msRaw}", disabling keepalive`);
-    return undefined;
-  }
-  if (ms === 0) return undefined;
-
-  const retryMsRaw = (process.env.DB_KEEPALIVE_RETRY_MS ?? '10000').trim();
-  const retryMs = Number(retryMsRaw);
-  if (!Number.isFinite(retryMs) || retryMs <= 0) {
-    console.warn(
-      `[keepalive] invalid DB_KEEPALIVE_RETRY_MS="${retryMsRaw}", disabling keepalive`,
-    );
-    return undefined;
-  }
-
-  console.log(
-    `[keepalive] DB ping every ${Math.round(ms / 1000)}s (retry ${Math.round(retryMs / 1000)}s until ok)`,
-  );
-
-  /** @type {NodeJS.Timeout | undefined} */
-  let timer;
-  let stopped = false;
-  let failures = 0;
-  /** @type {'normal' | 'retry'} */
-  let mode = 'normal';
-
-  const schedule = (delayMs) => {
-    if (stopped) return;
-    timer = setTimeout(() => void tick(), delayMs);
-  };
-
-  const tick = async () => {
-    if (stopped) return;
-
-    try {
-      await p.query('SELECT 1');
-      failures = 0;
-      console.log(`[keepalive] db ok (${mode})`);
-      mode = 'normal';
-      schedule(ms);
-      return;
-    } catch (e) {
-      failures += 1;
-      const msg = errorOneLine(e);
-      console.warn(`[keepalive] db ping failed (x${failures}, ${mode}): ${msg}`);
-      mode = 'retry';
-      schedule(retryMs);
-    }
-  };
-
-  // First attempt immediately.
-  schedule(0);
-
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-  };
-}
-
-/**
  * @param {string} signal
  */
 async function shutdown(signal) {
   console.log(`${signal} received, closing DB pool`);
-  if (stopKeepalive) stopKeepalive();
   if (pool) await pool.end().catch(() => {});
   process.exit(0);
 }
