@@ -4,22 +4,15 @@ const { Pool } = pg;
 
 export function createPool() {
   // pg reads DATABASE_URL when connectionString is supplied.
-  // Railway docs: reference DATABASE_URL from the Postgres service onto the bot service.
-  // Bot → Variables → Name: DATABASE_URL  Value: ${{Postgres.DATABASE_URL}}
-  // (ServiceName = exact title of your Postgres card on the project canvas, case-sensitive)
-  // Template syntax uses NO spaces: ${{Name.VAR}} not ${{ Name.VAR }}
+  // Neon / Supabase / Railway: set DATABASE_URL on the process that runs the bot (not committed to git).
 
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error(
-      'DATABASE_URL is not set on this service.\n' +
-        'Railway fix:\n' +
-        '  1. Open the Postgres service → Variables → find DATABASE_URL → copy its value.\n' +
-        '  2. Open the Bot service → Variables → Add variable.\n' +
-        '     Name: DATABASE_URL\n' +
-        '     Value (template, no quotes): ${{Postgres.DATABASE_URL}}\n' +
-        '     (replace "Postgres" with the exact name shown on the graph card — check Settings > Name)\n' +
-        '  3. Redeploy the Bot service.',
+      'DATABASE_URL is not set.\n' +
+        'Set it in your host\'s environment (e.g. Fly.io secrets, Render env, Railway variables, or local .env):\n' +
+        '  Name: DATABASE_URL\n' +
+        '  Value: your Postgres URL (Neon dashboard → Connection string; include sslmode=require if the provider shows it).',
     );
   }
 
@@ -30,5 +23,6 @@ export function createPool() {
     // malformed URL — pg will give a clearer error at connect time
   }
 
-  return new Pool({ connectionString, max: 3 });
+  const max = Math.max(1, Math.min(20, Number(process.env.PG_POOL_MAX ?? '3')));
+  return new Pool({ connectionString, max });
 }

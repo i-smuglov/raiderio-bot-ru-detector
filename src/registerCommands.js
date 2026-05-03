@@ -3,6 +3,7 @@ import {
   Routes,
   SlashCommandBuilder,
   PermissionFlagsBits,
+  ChannelType,
 } from 'discord.js';
 
 const commands = [
@@ -20,6 +21,13 @@ const commands = [
       o
         .setName('detect_guild_cyrillic')
         .setDescription('Detect Cyrillic in guild names (default: false)')
+        .setRequired(false),
+    )
+    .addChannelOption((o) =>
+      o
+        .setName('feed_channel')
+        .setDescription('Raider.IO feed channel scanned by /cron/poll (text or announcement)')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         .setRequired(false),
     ),
   new SlashCommandBuilder()
@@ -42,16 +50,19 @@ const commands = [
 
 /**
  * @param {string} token
- * @param {string} applicationId
+ * @param {string} [applicationId] if omitted, resolved via GET /oauth2/applications/@me
  */
 export async function registerSlashCommands(token, applicationId) {
   const rest = new REST().setToken(token);
+  const appId =
+    applicationId ??
+    /** @type {{ id: string }} */ (await rest.get(Routes.oauth2CurrentApplication())).id;
   const guildId = process.env.DISCORD_GUILD_ID;
   if (guildId) {
-    await rest.put(Routes.applicationGuildCommands(applicationId, guildId), {
+    await rest.put(Routes.applicationGuildCommands(appId, guildId), {
       body: commands,
     });
-    const after = await rest.get(Routes.applicationGuildCommands(applicationId, guildId));
+    const after = await rest.get(Routes.applicationGuildCommands(appId, guildId));
     console.log(
       '[commands] guild registered:',
       Array.isArray(after)
@@ -59,8 +70,8 @@ export async function registerSlashCommands(token, applicationId) {
         : after,
     );
   } else {
-    await rest.put(Routes.applicationCommands(applicationId), { body: commands });
-    const after = await rest.get(Routes.applicationCommands(applicationId));
+    await rest.put(Routes.applicationCommands(appId), { body: commands });
+    const after = await rest.get(Routes.applicationCommands(appId));
     console.log(
       '[commands] global registered:',
       Array.isArray(after)

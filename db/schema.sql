@@ -12,6 +12,12 @@ create table if not exists discord_guild_settings (
 alter table discord_guild_settings
   add column if not exists detect_guild_cyrillic boolean not null default false;
 
+-- HTTP / cron polling: which channel to scan and last processed message id (snowflake).
+alter table discord_guild_settings
+  add column if not exists feed_channel_id text;
+alter table discord_guild_settings
+  add column if not exists last_polled_message_id text;
+
 
 create table if not exists player_strikes (
   player_name text not null,
