@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    { "source": "/interactions", "destination": "/api/interactions" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/poll",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

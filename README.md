@@ -6,7 +6,7 @@ A Discord bot that monitors [Raider.IO](https://raider.io) group messages and al
 
 1. A **scheduled HTTP job** (or external cron) calls `POST` or `GET` `/cron/poll` on this service. The job uses the Discord **REST API** to read new messages in your configured feed channel (no WebSocket / Gateway worker).
 2. When a Raider.IO bot message matches the detection rules, the app creates an alert **thread** and pings your officer role (same behavior as before).
-3. **Slash commands** (`/setup`, `/info`, `/catchup`) are served over Discord’s **Interactions** endpoint (`POST /interactions` on this service).
+3. **Slash commands** (`/setup`, `/info`, `/catchup`) are served over Discord’s **Interactions** endpoint (`POST` to your public HTTPS URL — on Vercel use `/api/interactions`; self‑hosted `node src/index.js` uses `/interactions`).
 
 ---
 
@@ -67,22 +67,27 @@ If `DISCORD_GUILD_ID` is set in `.env`, commands are registered for that guild o
 
 ### 6. Point Discord at Your HTTPS URL
 
-1. In the Developer Portal → **General Information** → **Interactions Endpoint URL**, set:
+1. In the Developer Portal → **General Information** → **Interactions Endpoint URL**, set one of:
 
-   `https://<your-public-host>/interactions`
+   - **Vercel:** `https://<your-deployment>.vercel.app/api/interactions`  
+     (`vercel.json` also rewrites `/interactions` → `/api/interactions` if you prefer that shorter path.)
+   - **Self‑hosted Node:** `https://<your-public-host>/interactions`
 
 2. Discord will POST signed payloads to that path. Your service must be reachable over **HTTPS** with a valid certificate (local tunnels such as [ngrok](https://ngrok.com) work for development).
 
+**If Discord says the URL could not be verified:** redeploy after adding the `api/` routes, use the exact `/api/interactions` URL, confirm `DISCORD_PUBLIC_KEY` is the **Application** public key (hex, no spaces), and confirm `DATABASE_URL` is set (the handler touches the DB for slash commands).
+
 ### 7. Deploy the Service
 
-The process is a normal Node HTTP server: `GET /` (health), `POST /interactions` (Discord), `POST` or `GET` `/cron/poll` (your scheduler).
+- **Vercel:** serverless routes under `api/` — `GET /` may 404 unless you add a root handler; Discord hits `POST /api/interactions`. Cron: `vercel.json` calls `GET /api/cron/poll` every 5 minutes (set `CRON_SECRET`; Vercel sends `Authorization: Bearer` automatically for crons).
+- **Self‑hosted:** `node src/index.js` — `GET /` (health), `POST /interactions`, `POST` or `GET` `/cron/poll`.
 
 #### Option A: Railway (or similar PaaS)
 
 1. Create a project and add **PostgreSQL**
 2. Deploy this repo as a web service
 3. Set environment variables (see table below)
-4. Add a **cron** or scheduled job that calls `/cron/poll` on your public URL with the `CRON_SECRET` you configured (e.g. `Authorization: Bearer <CRON_SECRET>`)
+4. **Cron:** on Vercel, `vercel.json` schedules `/api/cron/poll` (set `CRON_SECRET` in the project). Else use an external scheduler calling `/cron/poll` (self‑hosted) or `/api/cron/poll` (Vercel) with `Authorization: Bearer <CRON_SECRET>`.
 
 #### Option B: Self-hosted
 
