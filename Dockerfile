@@ -6,4 +6,4 @@ RUN npm ci --omit=dev
 COPY src ./src
 # Railway sets PORT; default matches local .env.example
 EXPOSE 8080
-CMD ["node", "src/index.js"]
+CMD ["node", "--max-old-space-size=48", "--max-semi-space-size=8", "src/index.js"]

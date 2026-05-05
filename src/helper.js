@@ -1,39 +1,11 @@
 import { EmbedBuilder } from 'discord.js';
 
 const RAIDRIO_TIMEOUT_MS = Number(process.env.RAIDERIO_TIMEOUT_MS ?? 6000);
-const RAIDRIO_RUN_CACHE_TTL_MS = Number(process.env.RAIDERIO_RUN_CACHE_TTL_MS ?? 10 * 60 * 1000); // 10m
 
 // Group Details link example:
 // https://raider.io/mythic-plus-runs/season-mn-1/13163886-15-pit-of-saron?utm_source=discord&utm_medium=notification
 export const RUN_DETAILS_LINK_REGEX =
   /https:\/\/raider\.io\/mythic-plus-runs\/(?<season>[^/]+)\/(?<id>\d+)-/g;
-
-/** @type {Map<string, { value: unknown; expiresAt: number }>} */
-const runDetailsCache = new Map();
-
-/**
- * @param {string} k
- * @returns {unknown | undefined} undefined => not cached/expired
- */
-function cacheGet(k) {
-  const hit = runDetailsCache.get(k);
-  if (!hit) return undefined;
-  if (Date.now() >= hit.expiresAt) {
-    runDetailsCache.delete(k);
-    return undefined;
-  }
-  return hit.value;
-}
-
-/**
- * @param {string} k
- * @param {unknown} value
- */
-function cacheSet(k, value) {
-  // Simple size guard to avoid unbounded growth.
-  if (runDetailsCache.size > 10_000) runDetailsCache.clear();
-  runDetailsCache.set(k, { value, expiresAt: Date.now() + RAIDRIO_RUN_CACHE_TTL_MS });
-}
 
 /**
  * @param {string | null | undefined} description
@@ -55,10 +27,6 @@ export function parseRunFromDescription(description) {
  * @returns {Promise<unknown | null>}
  */
 export async function fetchRunDetails(season, id) {
-  const cacheKey = `${season}\0${id}`;
-  const cached = cacheGet(cacheKey);
-  if (cached !== undefined) return cached;
-
   const url = new URL('https://raider.io/api/v1/mythic-plus/run-details');
   url.searchParams.set('season', season);
   url.searchParams.set('id', id);
@@ -68,16 +36,13 @@ export async function fetchRunDetails(season, id) {
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(t);
     if (!res.ok) {
-      cacheSet(cacheKey, null);
       return null;
     }
     const body = await res.json();
-    cacheSet(cacheKey, body);
     return body;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[raider.io]', msg);
-    cacheSet(cacheKey, null);
     return null;
   }
 }
