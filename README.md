@@ -69,7 +69,8 @@ psql $DATABASE_URL -f db/schema.sql
 |---|---|
 | `DISCORD_TOKEN` | Bot token from step 1 |
 | `DATABASE_URL` | PostgreSQL connection string (use Railway's internal reference) |
-| `BOT_DEBUG_USER_ID` | *(Optional)* Your Discord user ID — pings you on every Raider.IO message for testing |
+| `BOT_DEBUG_USER_ID` | *(Optional)* Discord user ID to ping alongside the officer role when an alert fires (normal checks still apply) |
+| `BOT_DEBUG_GUILD_IDS` | *(Optional)* Comma-separated Discord guild IDs where the debug user should be pinged |
 
 #### Option B: Self-hosted
 
@@ -111,5 +112,6 @@ Shows current configuration (tracked WoW guild and officer role ID).
 | `DISCORD_TOKEN` | Yes | Discord bot token |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `PORT` | No | HTTP health check port (default: `8080`) |
-| `BOT_DEBUG_USER_ID` | No | Discord user ID to always ping on every Raider.IO message |
+| `BOT_DEBUG_USER_ID` | No | Discord user ID to ping alongside the officer role when an alert fires (normal checks still apply) |
+| `BOT_DEBUG_GUILD_IDS` | No | Comma-separated Discord guild IDs where the debug user should be pinged |
 | `DISCORD_GUILD_ID` | No | If set, registers slash commands to this guild only (faster for testing) |

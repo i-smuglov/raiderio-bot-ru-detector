@@ -4,7 +4,7 @@ const RAIDRIO_TIMEOUT_MS = Number(process.env.RAIDERIO_TIMEOUT_MS ?? 6000);
 
 // Group Details link example:
 // https://raider.io/mythic-plus-runs/season-mn-1/13163886-15-pit-of-saron?utm_source=discord&utm_medium=notification
-export const RUN_DETAILS_LINK_REGEX =
+const RUN_DETAILS_LINK_REGEX =
   /https:\/\/raider\.io\/mythic-plus-runs\/(?<season>[^/]+)\/(?<id>\d+)-/g;
 
 /**

@@ -10,7 +10,7 @@ import {
   InteractionType,
   MessageFlags,
 } from 'discord.js';
-import { createPool } from './dbPool.js';
+import { createPool, waitForDb } from './dbPool.js';
 import { GuildStore } from './guildStore.js';
 import { registerSlashCommands } from './registerCommands.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
@@ -20,6 +20,11 @@ const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
 const logDebug = (...args) => {
   if (LOG_LEVEL === 'debug') console.log(...args);
 };
+
+const debugUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+const debugGuildIds = new Set(
+  (process.env.BOT_DEBUG_GUILD_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+);
 
 /**
  * Bind HTTP first and only then run DB/Discord startup.
@@ -89,7 +94,7 @@ async function handleInteraction(interaction) {
     }
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+    const alwaysPingUserId = debugUserId && debugGuildIds.has(guildId) ? debugUserId : undefined;
     let lastEditAt = 0;
     const res = await catchupExecute(ch, store, {
       days,
@@ -183,8 +188,7 @@ async function handleInteraction(interaction) {
       const days = Math.max(1, Math.min(365, options.getInteger('days') ?? 7));
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
-      const preview = await catchupPreview(ch, store, { days, alwaysPingUserId });
+      const preview = await catchupPreview(ch, store, { days });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -273,7 +277,7 @@ function errorOneLine(e) {
   return bits.length ? bits.join(' ') : err.name || 'Error';
 }
 
-function startBot() {
+async function startBot() {
   token = process.env.DISCORD_TOKEN ?? '';
   if (!token) {
     throw new Error('Missing DISCORD_TOKEN');
@@ -285,6 +289,11 @@ function startBot() {
   pool.on('error', (err) => {
     console.warn(`[db] pool error: ${errorOneLine(err)}`);
   });
+
+  // Wait for Postgres to finish starting up before accepting Discord events.
+  // Railway can take a few seconds to initialize the DB after deployment.
+  await waitForDb(pool);
+
   store = new GuildStore(pool);
 
   client.once(Events.ClientReady, async (c) => {
@@ -309,7 +318,7 @@ function startBot() {
     void (async () => {
       logDebug(`[msg] from "${message.author.username}" bot=${message.author.bot} guild=${message.guildId ?? 'none'} ch=${message.channelId}`);
       if (!message.guild || !store) { logDebug('[msg] skip: no guild or store'); return; }
-      const alwaysPingUserId = process.env.BOT_DEBUG_USER_ID?.trim() || undefined;
+      const alwaysPingUserId = debugUserId && debugGuildIds.has(message.guild.id) ? debugUserId : undefined;
       if (message.author.bot && message.author.username === 'Raider.IO') {
         try {
           await handleRaiderIoMessage(message, store, { alwaysPingUserId });
@@ -336,10 +345,8 @@ async function shutdown(signal) {
 }
 
 startHealthServer(() => {
-  try {
-    startBot();
-  } catch (e) {
+  startBot().catch((e) => {
     console.error('[boot] startup failed (health server is already listening):', e);
     process.exit(1);
-  }
+  });
 });

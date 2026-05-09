@@ -24,7 +24,7 @@ function cutoffDate(days) {
 /**
  * @param {import('discord.js').TextChannel | import('discord.js').NewsChannel} channel
  * @param {import('./guildStore.js').GuildStore} store
- * @param {{ days: number; maxMessages?: number; alwaysPingUserId?: string }} opts
+ * @param {{ days: number; maxMessages?: number }} opts
  */
 export async function catchupPreview(channel, store, opts) {
   if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {

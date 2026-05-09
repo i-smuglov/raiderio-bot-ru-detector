@@ -50,23 +50,6 @@ export class GuildStore {
     return row;
   }
 
-  /** @param {string} playerName */
-  async incrementStrike(playerName) {
-    const r = await this.pool.query(
-      `insert into player_strikes (player_name, strikes)
-       values ($1, 1)
-       on conflict (player_name)
-       do update set
-         strikes = player_strikes.strikes + 1,
-         updated_at = now()
-       returning strikes`,
-      [playerName],
-    );
-    const row = r.rows[0];
-    if (!row) throw new Error('incrementStrike returned no row');
-    return row.strikes;
-  }
-
   /**
    * Increment strikes for multiple players in a single query.
    * Input is expected to be unique per run (no duplicates).

@@ -70,11 +70,11 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
 
   const settings = await store.getSettings(guildId);
   const wowGuildName = settings?.wow_guild_name ?? null;
-  const canAlert = Boolean(opts.alwaysPingUserId || settings?.officer_role_id);
+  const canAlert = Boolean(settings?.officer_role_id);
   const detectGuildCyrillic = Boolean(settings?.detect_guild_cyrillic);
 
   if (!canAlert) {
-    logDebug(tag, 'skip: alert would ping nobody (no officer_role_id, no alwaysPingUserId)');
+    logDebug(tag, 'skip: alert would ping nobody (no officer_role_id)');
     return;
   }
 

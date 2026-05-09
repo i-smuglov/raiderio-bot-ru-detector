@@ -32,3 +32,27 @@ export function createPool() {
 
   return new Pool({ connectionString, max: 3 });
 }
+
+/**
+ * Retry a SELECT 1 until Postgres accepts connections.
+ * Handles 57P03 "the database system is starting up" which Railway emits
+ * for a few seconds after the Postgres service restarts.
+ *
+ * @param {import('pg').Pool} pool
+ * @param {{ maxAttempts?: number; baseDelayMs?: number }} [opts]
+ */
+export async function waitForDb(pool, { maxAttempts = 12, baseDelayMs = 500 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await pool.query('SELECT 1');
+      console.log(`[db] ready (attempt ${attempt})`);
+      return;
+    } catch (/** @type {any} */ err) {
+      // 57P03 = database system is starting up
+      if (err?.code !== '57P03' || attempt === maxAttempts) throw err;
+      const delay = Math.min(baseDelayMs * 2 ** (attempt - 1), 10_000);
+      console.warn(`[db] starting up, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
