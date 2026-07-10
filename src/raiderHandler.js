@@ -126,14 +126,6 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   store.saveCheckedMessage(guildId, { channelId: message.channelId, messageId: message.id })
     .catch((e) => console.error(tag, 'saveCheckedMessage failed:', e));
 
-  // If guild-mode is OFF, we only care about Cyrillic in the message itself (player names).
-  // Avoid Raider.IO API calls when the embed text already proves "no Cyrillic".
-  const hasCyrillicInMessage = CYRILLIC_REGEX.test(description);
-  if (!detectGuildCyrillic && !hasCyrillicInMessage) {
-    logDebug(tag, 'skip: guild-mode off and no Cyrillic in embed text (no API call)');
-    return;
-  }
-
   const run = parseRunFromDescription(description);
   if (!run) {
     logDebug(tag, 'skip: no run link found in embed description');
