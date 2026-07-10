@@ -34,24 +34,56 @@ export function createPool() {
 }
 
 /**
+ * Node/system error codes that indicate Railway's private network or the
+ * Postgres service itself is not yet reachable — these are transient at
+ * startup and should be retried just like the Postgres 57P03 code.
+ *
+ * ENOTFOUND / EAI_AGAIN — DNS not yet resolving (private network initializing)
+ * ECONNREFUSED          — TCP port not yet open
+ * ECONNRESET            — connection dropped mid-handshake
+ * ETIMEDOUT             — connection timed out during startup
+ */
+const RETRYABLE_NODE_CODES = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+]);
+
+/**
+ * Returns true when the error is transient and a retry makes sense.
+ * @param {any} err
+ */
+function isRetryable(err) {
+  // Postgres "database system is starting up"
+  if (err?.code === '57P03') return true;
+  // Network / DNS errors that occur before a TCP connection is established
+  if (RETRYABLE_NODE_CODES.has(err?.code)) return true;
+  return false;
+}
+
+/**
  * Retry a SELECT 1 until Postgres accepts connections.
- * Handles 57P03 "the database system is starting up" which Railway emits
- * for a few seconds after the Postgres service restarts.
+ * Handles:
+ *   - 57P03 "the database system is starting up" (Postgres restart)
+ *   - DNS / TCP errors while Railway's private network is initializing
  *
  * @param {import('pg').Pool} pool
  * @param {{ maxAttempts?: number; baseDelayMs?: number }} [opts]
  */
-export async function waitForDb(pool, { maxAttempts = 12, baseDelayMs = 500 } = {}) {
+export async function waitForDb(pool, { maxAttempts = 20, baseDelayMs = 500 } = {}) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       await pool.query('SELECT 1');
       console.log(`[db] ready (attempt ${attempt})`);
       return;
     } catch (/** @type {any} */ err) {
-      // 57P03 = database system is starting up
-      if (err?.code !== '57P03' || attempt === maxAttempts) throw err;
+      if (!isRetryable(err) || attempt === maxAttempts) throw err;
       const delay = Math.min(baseDelayMs * 2 ** (attempt - 1), 10_000);
-      console.warn(`[db] starting up, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`);
+      console.warn(
+        `[db] not ready (${err.code}), retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`,
+      );
       await new Promise((r) => setTimeout(r, delay));
     }
   }
