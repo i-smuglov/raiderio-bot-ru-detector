@@ -120,6 +120,12 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
+  // Guild is configured — advance the cursor for every Raider.IO post we see from here,
+  // regardless of whether it ends up being flagged or skipped for clean content.
+  // This ensures the startup catchup never re-scans already-seen clean posts.
+  store.saveCheckedMessage(guildId, { channelId: message.channelId, messageId: message.id })
+    .catch((e) => console.error(tag, 'saveCheckedMessage failed:', e));
+
   // If guild-mode is OFF, we only care about Cyrillic in the message itself (player names).
   // Avoid Raider.IO API calls when the embed text already proves "no Cyrillic".
   const hasCyrillicInMessage = CYRILLIC_REGEX.test(description);
@@ -145,11 +151,6 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     logDebug(tag, `skip: run-details returned empty roster season=${run.season} id=${run.id}`);
     return;
   }
-
-  // We have a valid API result — advance the checked cursor regardless of outcome below.
-  // Fire-and-forget: a DB failure here must not prevent the alert from being sent.
-  store.saveCheckedMessage(guildId, { channelId: message.channelId, messageId: message.id })
-    .catch((e) => console.error(tag, 'saveCheckedMessage failed:', e));
 
   const hasCyrillic = detectGuildCyrillic
     ? runHasCyrillic(CYRILLIC_REGEX, roster)
