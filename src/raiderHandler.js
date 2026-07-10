@@ -17,6 +17,49 @@ const logDebug = (...args) => {
   if (LOG_LEVEL === 'debug') console.log(...args);
 };
 
+// ---------------------------------------------------------------------------
+// Per-guild gap tracker (in-memory, resets on restart — intentional).
+//
+// When a message can't be definitively evaluated (transient API failure), its
+// ID is recorded as a "gap". Subsequent messages in the same guild are still
+// processed normally, but the cursor is NOT advanced past the gap. On the next
+// restart, catchup re-scans from the old cursor position and retries every
+// message from the gap onward. Messages that were already actioned (threads
+// created, clean runs confirmed) are handled via the normal dedup path.
+// ---------------------------------------------------------------------------
+
+/** @type {Map<string, Set<bigint>>} guildId → set of unsettled message IDs */
+const pendingGaps = new Map();
+
+/** @param {string} guildId @param {string} messageId */
+function recordGap(guildId, messageId) {
+  let s = pendingGaps.get(guildId);
+  if (!s) { s = new Set(); pendingGaps.set(guildId, s); }
+  s.add(BigInt(messageId));
+}
+
+/** @param {string} guildId @param {string} messageId */
+function resolveGap(guildId, messageId) {
+  pendingGaps.get(guildId)?.delete(BigInt(messageId));
+}
+
+/**
+ * Returns true when at least one recorded gap for this guild has a lower
+ * snowflake than messageId — meaning the cursor must not advance past it yet.
+ *
+ * @param {string} guildId
+ * @param {string} messageId
+ */
+function hasEarlierGap(guildId, messageId) {
+  const s = pendingGaps.get(guildId);
+  if (!s || s.size === 0) return false;
+  const id = BigInt(messageId);
+  for (const gap of s) {
+    if (gap < id) return true;
+  }
+  return false;
+}
+
 /**
  * Deterministic thread name for a given source message ID.
  * Encoding the source message ID here is what makes Discord the authoritative
@@ -120,27 +163,40 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
-  // Guild is configured — advance the cursor for every Raider.IO post we see from here,
-  // regardless of whether it ends up being flagged or skipped for clean content.
-  // This ensures the startup catchup never re-scans already-seen clean posts.
-  store.saveCheckedMessage(guildId, { channelId: message.channelId, messageId: message.id })
-    .catch((e) => console.error(tag, 'saveCheckedMessage failed:', e));
+  // Advance the cursor only on definitive outcomes (clean or flagged).
+  // Resolves this message's gap entry (if any) then writes the cursor only when
+  // no earlier gap exists — ensuring the cursor never skips over a pending retry.
+  const markChecked = () => {
+    resolveGap(guildId, message.id);
+    if (hasEarlierGap(guildId, message.id)) {
+      logDebug(tag, `cursor hold: earlier gap present, not advancing past ${message.id}`);
+      return;
+    }
+    store.saveCheckedMessage(guildId, { channelId: message.channelId, messageId: message.id })
+      .catch((e) => console.error(tag, 'saveCheckedMessage failed:', e));
+  };
 
   const run = parseRunFromDescription(description);
   if (!run) {
     logDebug(tag, 'skip: no run link found in embed description');
+    markChecked(); // definitive: not a run post
     return;
   }
 
   const body = await fetchRunDetails(run.season, run.id);
   if (!body) {
-    logDebug(tag, `skip: failed to fetch run-details season=${run.season} id=${run.id}`);
+    // Transient failure — record the gap so the cursor cannot advance past this
+    // message until it is retried. The next restart's catchup will re-scan from
+    // the last committed cursor position and re-evaluate this message.
+    recordGap(guildId, message.id);
+    console.warn(tag, `raider.io API unavailable for season=${run.season} id=${run.id} — gap recorded, will retry on next restart`);
     return;
   }
 
   const roster = rosterFromRunDetails(body);
   if (roster.length === 0) {
     logDebug(tag, `skip: run-details returned empty roster season=${run.season} id=${run.id}`);
+    markChecked(); // definitive: API responded, no roster to evaluate
     return;
   }
 
@@ -161,6 +217,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
 
   if (!hasCyrillic) {
     logDebug(tag, 'skip: no cyrillic (run-details)');
+    markChecked(); // definitive: clean run
     return;
   }
 
@@ -169,6 +226,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
 
   if (suspectNames.length === 0) {
     logDebug(tag, 'skip: no tracked guild members found in this run roster');
+    markChecked(); // definitive: cyrillic present but none from our guild
     return;
   }
 
@@ -179,6 +237,7 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   const existingThread = await findActiveAlertThread(message.channel, message.id);
   if (existingThread) {
     logDebug(tag, `skip: alert thread already exists (${existingThread.id}) for message ${message.id}`);
+    markChecked(); // definitive: already handled in a previous run
     return;
   }
 
@@ -207,11 +266,16 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   ].filter(Boolean);
   const mention = mentionParts.length ? `${mentionParts.join(' ')} ` : '';
 
+  // createAlertThread throws on Discord error — if it does, markChecked is never
+  // called and the cursor stays behind this message so catchup can retry.
   const thread = await createAlertThread(message.channel, message.id);
   const threadMessage = await thread.send({
     content: `${mention}Imposter detected.\n${parts.join('\n')}.\nReason: ${reason}`,
     embeds: [embedFromMessageEmbed(embed)],
   });
+
+  // Advance cursor only after the thread is confirmed created.
+  markChecked();
 
   // Fire-and-forget: thread creation is already the authoritative record.
   // A DB failure here is recoverable — the thread exists, officers are notified.
