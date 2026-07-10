@@ -6,7 +6,8 @@ A Discord bot that monitors [Raider.IO](https://raider.io) group messages and al
 
 1. The bot listens for messages from the **Raider.IO** bot in your configured channel
 2. When a message contains Cyrillic characters, it resolves each player's WoW guild via the Raider.IO API
-3. If any player from your tracked WoW guild is found in that group, a private thread is created and officers are pinged
+3. If any player from your tracked WoW guild is found in that group, a private alert thread is created and officers are pinged
+4. On every startup the bot automatically scans for any Raider.IO posts it missed while offline and processes them
 
 ---
 
@@ -50,11 +51,13 @@ The bot must be able to see the channel where Raider.IO posts:
 
 The bot requires a **PostgreSQL** database. You can use [Railway](https://railway.app), Supabase, or any Postgres provider.
 
-Run the schema once to create the required tables:
+Run the schema to create the required tables (safe to re-run on updates):
 
 ```bash
-psql $DATABASE_URL -f db/schema.sql
+psql "postgresql://USER:PASSWORD@HOST:PORT/DBNAME" -f db/schema.sql
 ```
+
+> **Railway note:** use the **Public Network** connection URL from the Postgres service → Connect tab, not the internal `.railway.internal` hostname.
 
 ### 5. Deploy the Bot
 
@@ -105,6 +108,14 @@ Shows current configuration (tracked WoW guild and officer role ID).
 
 ---
 
+## Gap Detection & Sleep Mode
+
+The bot tracks the last Raider.IO message it successfully evaluated. On every startup it automatically fetches and processes any messages that arrived while it was offline (e.g. during Railway sleep). No manual intervention is needed.
+
+Alert threads are named `alert-{messageId}` internally, which lets the bot identify already-processed posts using Discord as the source of truth — even if the database was not reachable when the post was first handled.
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -115,3 +126,4 @@ Shows current configuration (tracked WoW guild and officer role ID).
 | `BOT_DEBUG_USER_ID` | No | Discord user ID to ping alongside the officer role when an alert fires (normal checks still apply) |
 | `BOT_DEBUG_GUILD_IDS` | No | Comma-separated Discord guild IDs where the debug user should be pinged |
 | `DISCORD_GUILD_ID` | No | If set, registers slash commands to this guild only (faster for testing) |
+| `LOG_LEVEL` | No | Set to `debug` for verbose per-message logging |

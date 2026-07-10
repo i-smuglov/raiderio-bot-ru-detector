@@ -86,4 +86,80 @@ export class GuildStore {
 
     return r.rows.map((row) => row?.strikes ?? 0);
   }
+
+  /**
+   * Advance the processing cursor after every fully-evaluated Raider.IO message,
+   * regardless of whether it was flagged. This is the watermark used for gap detection.
+   *
+   * @param {string} discordGuildId
+   * @param {{ channelId: string; messageId: string }} value
+   */
+  async saveCheckedMessage(discordGuildId, value) {
+    await this.pool.query(
+      `insert into guild_bot_state (discord_guild_id, checked_channel_id, checked_message_id, checked_at, updated_at)
+       values ($1, $2, $3, now(), now())
+       on conflict (discord_guild_id) do update set
+         checked_channel_id = excluded.checked_channel_id,
+         checked_message_id = excluded.checked_message_id,
+         checked_at         = excluded.checked_at,
+         updated_at         = now()`,
+      [discordGuildId, value.channelId, value.messageId],
+    );
+  }
+
+  /**
+   * Record the last successful flagged alert (source post + created thread).
+   *
+   * @param {string} discordGuildId
+   * @param {{ sourceChannelId: string; sourceMessageId: string; threadChannelId: string; threadMessageId?: string | null }} value
+   */
+  async saveFlaggedAlert(discordGuildId, value) {
+    await this.pool.query(
+      `insert into guild_bot_state (
+         discord_guild_id,
+         flagged_source_channel_id,
+         flagged_source_message_id,
+         flagged_thread_channel_id,
+         flagged_thread_message_id,
+         flagged_at,
+         updated_at
+       )
+       values ($1, $2, $3, $4, $5, now(), now())
+       on conflict (discord_guild_id) do update set
+         flagged_source_channel_id = excluded.flagged_source_channel_id,
+         flagged_source_message_id = excluded.flagged_source_message_id,
+         flagged_thread_channel_id = excluded.flagged_thread_channel_id,
+         flagged_thread_message_id = excluded.flagged_thread_message_id,
+         flagged_at                = excluded.flagged_at,
+         updated_at                = now()`,
+      [
+        discordGuildId,
+        value.sourceChannelId,
+        value.sourceMessageId,
+        value.threadChannelId,
+        value.threadMessageId ?? null,
+      ],
+    );
+  }
+
+  /** @param {string} discordGuildId */
+  async getBotState(discordGuildId) {
+    const r = await this.pool.query(
+      `select
+         discord_guild_id,
+         checked_channel_id,
+         checked_message_id,
+         checked_at,
+         flagged_source_channel_id,
+         flagged_source_message_id,
+         flagged_thread_channel_id,
+         flagged_thread_message_id,
+         flagged_at,
+         updated_at
+       from guild_bot_state
+       where discord_guild_id = $1`,
+      [discordGuildId],
+    );
+    return r.rows[0] ?? null;
+  }
 }

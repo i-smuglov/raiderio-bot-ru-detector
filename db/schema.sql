@@ -20,6 +20,49 @@ create table if not exists player_strikes (
   primary key (player_name)
 );
 
+-- Migration: rename guild_last_flagged_alert → guild_bot_state and add checked columns.
+-- Safe to run multiple times; each step guards itself.
+do $$
+begin
+  -- Rename old table if it exists under the old name.
+  if to_regclass('public.guild_last_flagged_alert') is not null
+     and to_regclass('public.guild_bot_state') is null then
+    alter table guild_last_flagged_alert rename to guild_bot_state;
+    alter table guild_bot_state rename column source_channel_id  to flagged_source_channel_id;
+    alter table guild_bot_state rename column source_message_id  to flagged_source_message_id;
+    alter table guild_bot_state rename column thread_channel_id  to flagged_thread_channel_id;
+    alter table guild_bot_state rename column thread_message_id  to flagged_thread_message_id;
+    alter table guild_bot_state rename column updated_at         to flagged_at;
+  end if;
+end $$;
+
+-- Fresh-install path: create the table with all columns in one shot.
+create table if not exists guild_bot_state (
+  discord_guild_id          text primary key references discord_guild_settings(discord_guild_id) on delete cascade,
+  -- last Raider.IO message the bot fully evaluated (clean or flagged)
+  checked_channel_id        text,
+  checked_message_id        text,
+  checked_at                timestamptz,
+  -- last message that was flagged and got an alert thread
+  flagged_source_channel_id text,
+  flagged_source_message_id text,
+  flagged_thread_channel_id text,
+  flagged_thread_message_id text,
+  flagged_at                timestamptz,
+  updated_at                timestamptz not null default now()
+);
+
+-- Migration: add any columns that are missing on the renamed table.
+alter table guild_bot_state add column if not exists checked_channel_id        text;
+alter table guild_bot_state add column if not exists checked_message_id        text;
+alter table guild_bot_state add column if not exists checked_at                timestamptz;
+alter table guild_bot_state add column if not exists flagged_source_channel_id text;
+alter table guild_bot_state add column if not exists flagged_source_message_id text;
+alter table guild_bot_state add column if not exists flagged_thread_channel_id text;
+alter table guild_bot_state add column if not exists flagged_thread_message_id text;
+alter table guild_bot_state add column if not exists flagged_at                timestamptz;
+alter table guild_bot_state add column if not exists updated_at                timestamptz not null default now();
+
 -- Migration: legacy `player_strikes` used (discord_guild_id, player_name) as PK.
 -- We aggregate strikes across guilds and then make strikes global per player_name.
 do $$

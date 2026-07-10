@@ -2,9 +2,6 @@ import http from 'node:http';
 import {
   Client,
   ChannelType,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   Events,
   GatewayIntentBits,
   InteractionType,
@@ -14,7 +11,7 @@ import { createPool, waitForDb } from './dbPool.js';
 import { GuildStore } from './guildStore.js';
 import { registerSlashCommands } from './registerCommands.js';
 import { handleRaiderIoMessage } from './raiderHandler.js';
-import { catchupExecute, catchupPreview } from './catchup.js';
+import { catchupFromCursor } from './catchup.js';
 
 const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
 const logDebug = (...args) => {
@@ -69,71 +66,6 @@ async function handleInteraction(interaction) {
   if (!store) return;
   if (!interaction.inGuild()) return;
 
-  // Button interactions (used by /catchup confirm).
-  if (interaction.isButton()) {
-    const guildId = interaction.guildId;
-    if (!guildId) return;
-    const [kind, daysStr, userId] = String(interaction.customId || '').split(':');
-    if (kind !== 'catchup_confirm') return;
-    if (userId && interaction.user.id !== userId) {
-      await interaction.reply({
-        content: 'This confirmation button belongs to someone else. Run `/catchup` yourself.',
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const days = Math.max(1, Math.min(365, Number(daysStr || 0) || 7));
-    const ch = interaction.channel;
-    if (!ch || (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement)) {
-      await interaction.reply({
-        content: 'Run `/catchup` in the Raider.IO feed channel (text/announcement channel).',
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const alwaysPingUserId = debugUserId && debugGuildIds.has(guildId) ? debugUserId : undefined;
-    let lastEditAt = 0;
-    const res = await catchupExecute(ch, store, {
-      days,
-      alwaysPingUserId,
-      onProgress: async (p) => {
-        // Throttle edits to avoid rate limits.
-        if (Date.now() - lastEditAt < 5000) return;
-        lastEditAt = Date.now();
-        const seconds = Math.round(p.runningForMs / 1000);
-        await interaction.editReply({
-          content: [
-            `Channel: <#${ch.id}>`,
-            `Days: ${days}`,
-            `Cutoff: ${p.cutoff.toISOString()}`,
-            `Running: ${seconds}s`,
-            `Scanned: ${p.scanned} (in range: ${p.inRange})`,
-            `Already threaded (skipped): ${p.alreadyThreaded}`,
-            `Attempted handler calls: ${p.attempted}`,
-            '',
-            '(working...)',
-          ].join('\n').slice(0, 2000),
-        }).catch(() => {});
-      },
-    });
-
-    await interaction.editReply({
-      content: [
-        `Channel: <#${ch.id}>`,
-        `Days: ${days}`,
-        `Cutoff: ${res.cutoff.toISOString()}`,
-        `Scanned: ${res.scanned} (in range: ${res.inRange})`,
-        `Already threaded (skipped): ${res.alreadyThreaded}`,
-        `Attempted handler calls: ${res.attempted}`,
-        `Stop: ${res.stopReason}`,
-      ].join('\n').slice(0, 2000),
-    });
-    return;
-  }
-
   if (interaction.type !== InteractionType.ApplicationCommand) return;
   if (!interaction.isChatInputCommand()) return;
 
@@ -171,45 +103,6 @@ async function handleInteraction(interaction) {
           `**Detect guild Cyrillic:** ${s?.detect_guild_cyrillic ? 'true' : 'false'}`,
         ].join('\n'),
         flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    if (commandName === 'catchup') {
-      const ch = interaction.channel;
-      if (!ch || (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement)) {
-        await interaction.reply({
-          content: 'Run `/catchup` in the Raider.IO feed channel (text/announcement channel).',
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-
-      const days = Math.max(1, Math.min(365, options.getInteger('days') ?? 7));
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-      const preview = await catchupPreview(ch, store, { days });
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`catchup_confirm:${days}:${interaction.user.id}`)
-          .setLabel('Confirm')
-          .setStyle(ButtonStyle.Danger),
-      );
-
-      await interaction.editReply({
-        content: [
-          `Channel: <#${ch.id}>`,
-          `Days: ${days}`,
-          `Cutoff: ${preview.cutoff.toISOString()}`,
-          `Scanned: ${preview.scanned} (in range: ${preview.inRange})`,
-          `Already threaded (will be skipped): ${preview.alreadyThreaded}`,
-          `Candidates (unthreaded Raider.IO posts): ${preview.candidates}`,
-          `Stop: ${preview.stopReason}`,
-          '',
-          'Press **Confirm** to create missing alert threads by running the normal detection procedure.',
-        ].join('\n').slice(0, 2000),
-        components: [row],
       });
       return;
     }
@@ -277,6 +170,45 @@ function errorOneLine(e) {
   return bits.length ? bits.join(' ') : err.name || 'Error';
 }
 
+/**
+ * On boot, scan forward from the stored cursor to catch any Raider.IO messages
+ * that arrived while the process was offline (Railway sleep / restart).
+ * Only runs if we have a previous checked_message_id for the guild.
+ *
+ * @param {import('discord.js').Guild} guild
+ */
+async function runStartupCatchup(guild) {
+  if (!store) return;
+  try {
+    const state = await store.getBotState(guild.id);
+    if (!state?.checked_channel_id || !state?.checked_message_id) {
+      logDebug(`[startup-catchup] guild=${guild.id}: no cursor stored, skipping`);
+      return;
+    }
+
+    const channel = await guild.channels.fetch(state.checked_channel_id).catch(() => null);
+    if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+      console.warn(`[startup-catchup] guild=${guild.id}: channel ${state.checked_channel_id} not found or wrong type`);
+      return;
+    }
+
+    const alwaysPingUserId = debugUserId && debugGuildIds.has(guild.id) ? debugUserId : undefined;
+    const result = await catchupFromCursor(
+      /** @type {import('discord.js').TextChannel | import('discord.js').NewsChannel} */ (channel),
+      store,
+      { afterMessageId: state.checked_message_id, alwaysPingUserId },
+    );
+
+    if (result.attempted > 0) {
+      console.log(`[startup-catchup] guild=${guild.id}: scanned=${result.scanned} attempted=${result.attempted} stop=${result.stopReason}`);
+    } else {
+      logDebug(`[startup-catchup] guild=${guild.id}: no missed messages (scanned=${result.scanned})`);
+    }
+  } catch (e) {
+    console.error(`[startup-catchup] guild=${guild.id} failed:`, e);
+  }
+}
+
 async function startBot() {
   token = process.env.DISCORD_TOKEN ?? '';
   if (!token) {
@@ -301,6 +233,13 @@ async function startBot() {
     console.log(`[boot] in ${c.guilds.cache.size} guild(s):`, [...c.guilds.cache.values()].map((g) => `${g.name}(${g.id})`).join(', '));
     await registerSlashCommands(token, c.user.id);
     console.log('Slash commands registered');
+
+    // Auto-catchup: process any Raider.IO messages that arrived while the bot was
+    // offline (Railway sleep). Runs fire-and-forget per guild so it doesn't block
+    // the ready event or other guilds.
+    for (const guild of c.guilds.cache.values()) {
+      void runStartupCatchup(guild);
+    }
   });
 
   client.on(Events.GuildCreate, (g) => {

@@ -18,6 +18,18 @@ const logDebug = (...args) => {
 };
 
 /**
+ * Deterministic thread name for a given source message ID.
+ * Encoding the source message ID here is what makes Discord the authoritative
+ * dedup store: we can always ask "does a thread named alert-{id} exist?" without
+ * touching the DB. Threads remain private — only the name changes.
+ *
+ * @param {string} sourceMessageId
+ */
+export function alertThreadName(sourceMessageId) {
+  return `alert-${sourceMessageId}`;
+}
+
+/**
  * @param {import('discord.js').Message['channel']} ch
  * @returns {ch is import('discord.js').TextChannel | import('discord.js').NewsChannel}
  */
@@ -29,10 +41,35 @@ function isRaidEmbedChannel(ch) {
 }
 
 /**
+ * Check active threads in the channel for one named alert-{sourceMessageId}.
+ * Returns the thread if found, null otherwise.
+ * Only active threads are checked — archived threads require expensive pagination.
+ * This is acceptable because the primary dedup path is the DB cursor (catchupFromCursor
+ * only ever sees messages newer than the last processed one). This check is the
+ * last-resort safety net for the case where the cursor write failed and a previously
+ * flagged thread is still active (within its auto-archive window).
+ *
  * @param {import('discord.js').TextChannel | import('discord.js').NewsChannel} channel
+ * @param {string} sourceMessageId
  */
-async function createAlertThread(channel) {
-  const name = `flagged-run-${Date.now()}`.slice(0, 100);
+async function findActiveAlertThread(channel, sourceMessageId) {
+  try {
+    const fetched = await channel.threads.fetchActive();
+    return fetched.threads.find((t) => t.name === alertThreadName(sourceMessageId)) ?? null;
+  } catch (e) {
+    // Non-fatal: if we can't fetch threads, allow the alert to proceed.
+    // Worst case: a duplicate thread is created, which is recoverable.
+    console.warn('[findActiveAlertThread] fetch failed, assuming no thread:', e?.message ?? e);
+    return null;
+  }
+}
+
+/**
+ * @param {import('discord.js').TextChannel | import('discord.js').NewsChannel} channel
+ * @param {string} sourceMessageId
+ */
+async function createAlertThread(channel, sourceMessageId) {
+  const name = alertThreadName(sourceMessageId);
   const base = {
     name,
     autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
@@ -109,6 +146,11 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
+  // We have a valid API result — advance the checked cursor regardless of outcome below.
+  // Fire-and-forget: a DB failure here must not prevent the alert from being sent.
+  store.saveCheckedMessage(guildId, { channelId: message.channelId, messageId: message.id })
+    .catch((e) => console.error(tag, 'saveCheckedMessage failed:', e));
+
   const hasCyrillic = detectGuildCyrillic
     ? runHasCyrillic(CYRILLIC_REGEX, roster)
     : roster.some((p) => CYRILLIC_REGEX.test(p.name));
@@ -137,6 +179,16 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
     return;
   }
 
+  // Discord-native dedup: check whether an alert thread for this exact source message
+  // already exists before creating a new one. This is the safety net that prevents
+  // duplicate alerts when the DB cursor write failed and the bot reprocesses the same
+  // message on a subsequent catchup run.
+  const existingThread = await findActiveAlertThread(message.channel, message.id);
+  if (existingThread) {
+    logDebug(tag, `skip: alert thread already exists (${existingThread.id}) for message ${message.id}`);
+    return;
+  }
+
   // Once per run per player (avoid double-increment if the same name appears twice).
   const uniqSuspectNames = [...new Set(suspectNames)];
   const strikes = await store.incrementStrikes(uniqSuspectNames);
@@ -162,9 +214,18 @@ export async function handleRaiderIoMessage(message, store, opts = {}) {
   ].filter(Boolean);
   const mention = mentionParts.length ? `${mentionParts.join(' ')} ` : '';
 
-  const thread = await createAlertThread(message.channel);
-  await thread.send({
+  const thread = await createAlertThread(message.channel, message.id);
+  const threadMessage = await thread.send({
     content: `${mention}Imposter detected.\n${parts.join('\n')}.\nReason: ${reason}`,
     embeds: [embedFromMessageEmbed(embed)],
   });
+
+  // Fire-and-forget: thread creation is already the authoritative record.
+  // A DB failure here is recoverable — the thread exists, officers are notified.
+  store.saveFlaggedAlert(guildId, {
+    sourceChannelId: message.channelId,
+    sourceMessageId: message.id,
+    threadChannelId: thread.id,
+    threadMessageId: threadMessage.id,
+  }).catch((e) => console.error(tag, 'saveFlaggedAlert failed:', e));
 }

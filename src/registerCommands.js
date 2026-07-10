@@ -26,18 +26,6 @@ const commands = [
     .setName('info')
     .setDescription('Show saved setup')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-  new SlashCommandBuilder()
-    .setName('catchup')
-    .setDescription('Scan last N days and create missing alert threads')
-    // Explicitly allow everyone to see/run `/catchup`.
-    // (Discord interprets "default_member_permissions: null" as "no restriction".)
-    .setDefaultMemberPermissions(null)
-    .addIntegerOption((o) =>
-      o
-        .setName('days')
-        .setDescription('How many days back to scan (default: 7)')
-        .setRequired(false),
-    ),
 ].map((c) => c.toJSON());
 
 /**
